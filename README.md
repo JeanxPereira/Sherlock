@@ -18,3 +18,12 @@ Standalone, without the AquaKit towers: `cmake -S tools/Sherlock -B build/sherlo
 The gates that read the corpus take its directories from the environment: `SHERLOCK_CACHE`
 (the extracted cache) and `SHERLOCK_STORE` (where the databases are written). The test
 CMake fills both from `References/scripts/target.py --paths`.
+
+## Query
+
+    $env:SHERLOCK_CACHE = "G:\AquaKit-refs\26A5416b\dsc\26A5416b__MacOS"
+    $env:SHERLOCK_STORE = "G:\AquaKit-refs\26A5416b\Sherlock"
+    .\build\tools\Sherlock\Debug\Sherlock.exe q 0x240622d98
+    .\build\tools\Sherlock\Debug\Sherlock.exe callers 0x2230edebc
+    .\build\tools\Sherlock\Debug\Sherlock.exe refs 0x29f60f388 --to 0x29f60f480
+    .\build\tools\Sherlock\Debug\Sherlock.exe status

@@ -81,3 +81,8 @@ foreach(scenario IN ITEMS meta-prepare meta-step images)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/QueryHeaderFailure.py
                 $<TARGET_FILE:Sherlock> ${CMAKE_CURRENT_BINARY_DIR} ${scenario})
 endforeach()
+
+add_test(NAME Sherlock.Parity
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/Parity.py
+                --sherlock $<TARGET_FILE:Sherlock> --store ${SHERLOCK_STORE_DIR})
+set_tests_properties(Sherlock.Parity PROPERTIES FIXTURES_REQUIRED SherlockStore TIMEOUT 600)
