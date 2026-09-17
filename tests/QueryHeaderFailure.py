@@ -1,3 +1,5 @@
+# Sherlock — tests/Sherlock/QueryHeaderFailure.py
+# Verifies that catalog failures keep their diagnostics and cannot produce a misleading header.
 import pathlib
 import sqlite3
 import subprocess
