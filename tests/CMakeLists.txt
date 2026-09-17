@@ -86,3 +86,7 @@ add_test(NAME Sherlock.Parity
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/Parity.py
                 --sherlock $<TARGET_FILE:Sherlock> --store ${SHERLOCK_STORE_DIR})
 set_tests_properties(Sherlock.Parity PROPERTIES FIXTURES_REQUIRED SherlockStore TIMEOUT 600)
+
+add_test(NAME Sherlock.ParityGates
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/ParityGates.py
+                ${CMAKE_CURRENT_BINARY_DIR}/ParityGateScratch)
