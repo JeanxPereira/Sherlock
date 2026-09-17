@@ -41,6 +41,10 @@ sherlock_module(DyldSharedCache
     SOURCES ${S}/DyldSharedCache/Cache.cpp
     LINKS Sherlock::Foundation Sherlock::MachO)
 
+sherlock_module(Facts
+    SOURCES ${S}/Facts/Disassembler.cpp ${S}/Facts/BranchIsland.cpp ${S}/Facts/LiteralReaders.cpp ${S}/Facts/ImageFacts.cpp
+    LINKS Sherlock::DyldSharedCache Sherlock::Store capstone_static)
+
 option(SHERLOCK_BUILD_TESTS "Builds Sherlock's gates" ON)
 if(SHERLOCK_BUILD_TESTS)
     enable_testing()
