@@ -25,4 +25,5 @@ function(sherlock_gate file)
 endfunction()
 
 sherlock_gate(FoundationGates LINKS Sherlock::Foundation)
+sherlock_gate(StoreGates LINKS Sherlock::Store)
 sherlock_gate(DyldSharedCacheGates LINKS Sherlock::DyldSharedCache)

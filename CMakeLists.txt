@@ -29,6 +29,10 @@ set(S ${CMAKE_CURRENT_LIST_DIR}/Source)
 sherlock_module(Foundation
     SOURCES ${S}/Foundation/Diagnostic.cpp ${S}/Foundation/MappedFile.cpp)
 
+sherlock_module(Store
+    SOURCES ${S}/Store/Database.cpp ${S}/Store/Schema.cpp
+    LINKS Sherlock::Foundation SherlockSqlite)
+
 sherlock_module(DyldSharedCache
     SOURCES ${S}/DyldSharedCache/Cache.cpp
     LINKS Sherlock::Foundation)
