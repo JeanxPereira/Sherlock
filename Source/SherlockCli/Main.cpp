@@ -1,23 +1,47 @@
 // Sherlock — tools/Sherlock/Source/SherlockCli/Main.cpp
-// Entry point: --version and `build facts` today; Task 7 adds the query commands.
+// Entry point: --version, `build facts`, and the query commands (q, callers, calls, refs, status).
 #include <DyldSharedCache/Cache.h>
 #include <Facts/Builder.h>
 #include <SherlockCli/Arguments.h>
 #include <SherlockCli/Demangler.h>
+#include <SherlockCli/Queries.h>
 #include <SherlockCli/Towers.h>
 
 #include <windows.h>
 
 #include <psapi.h>
 
+#include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
 
 using namespace Sherlock;
 
 namespace
 {
+    std::optional<std::uint64_t> ParseHexAddress(std::string_view text)
+    {
+        if (text.empty())
+        {
+            return std::nullopt;
+        }
+        const std::string owned(text);
+        char*             end = nullptr;
+        errno                   = 0;
+        const auto address      = std::strtoull(owned.c_str(), &end, 16);
+        if (end == owned.c_str() || *end != '\0' || errno == ERANGE)
+        {
+            return std::nullopt;
+        }
+        return static_cast<std::uint64_t>(address);
+    }
+
     int RunBuildFacts(const Cli::Invocation& invocation)
     {
         auto build = Cli::ReadTowersBuild(invocation.Towers);
@@ -110,6 +134,71 @@ int main(int argc, char** argv)
     {
         return RunBuildFacts(*invocation);
     }
+
+    Cli::QueryEnvironment env{invocation->Store, invocation->Full, invocation->Json};
+    if (invocation->Command == "status")
+    {
+        Cli::PrintHeader(env, "");
+        const auto verdict = Cli::RunStatus(env);
+        std::printf("demangler: %s\n",
+                    Cli::Demangler::Load(Cli::DefaultDemanglerPath()).has_value() ? "available" : "absent");
+        std::printf("%s\n", Cli::FormatVerdict(verdict).c_str());
+        return Cli::ExitCode(verdict);
+    }
+    if (invocation->Command == "q" || invocation->Command == "callers" || invocation->Command == "calls" ||
+        invocation->Command == "refs")
+    {
+        Cli::PrintHeader(env, "");
+        if (invocation->Positional.empty())
+        {
+            std::printf("verdict: NOT VERIFIED no address or symbol given\n");
+            return 2;
+        }
+        if (invocation->Command == "callers")
+        {
+            const auto address = ParseHexAddress(invocation->Positional.front());
+            if (!address)
+            {
+                std::printf("verdict: NOT VERIFIED invalid address %s\n", invocation->Positional.front().c_str());
+                return 2;
+            }
+            const auto verdict = Cli::RunCallers(env, *address);
+            std::printf("%s\n", Cli::FormatVerdict(verdict).c_str());
+            return Cli::ExitCode(verdict);
+        }
+        auto cache = DyldSharedCache::Cache::Open(invocation->Cache);
+        if (!cache)
+        {
+            std::printf("verdict: NOT VERIFIED %s\n", cache.error().Format().c_str());
+            return 2;
+        }
+        Cli::Verdict verdict;
+        if (invocation->Command == "q")
+        {
+            verdict = Cli::RunQuery(*cache, env, invocation->Positional.front());
+        }
+        else
+        {
+            const auto address = ParseHexAddress(invocation->Positional.front());
+            if (!address)
+            {
+                std::printf("verdict: NOT VERIFIED invalid address %s\n", invocation->Positional.front().c_str());
+                return 2;
+            }
+            if (invocation->Command == "calls")
+            {
+                verdict = Cli::RunCalls(*cache, env, *address);
+            }
+            else
+            {
+                const std::uint64_t endAddress = invocation->To.value_or(*address + 1);
+                verdict = Cli::RunRefs(*cache, env, *address, endAddress);
+            }
+        }
+        std::printf("%s\n", Cli::FormatVerdict(verdict).c_str());
+        return Cli::ExitCode(verdict);
+    }
+
     std::printf("NOT VERIFIED: command %s is not implemented in this build\n", invocation->Command.c_str());
     return 2;
 }

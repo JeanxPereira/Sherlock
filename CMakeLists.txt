@@ -50,7 +50,9 @@ add_executable(Sherlock
     ${S}/SherlockCli/Main.cpp
     ${S}/SherlockCli/Arguments.cpp
     ${S}/SherlockCli/Towers.cpp
-    ${S}/SherlockCli/Demangler.cpp)
+    ${S}/SherlockCli/Demangler.cpp
+    ${S}/SherlockCli/Verdict.cpp
+    ${S}/SherlockCli/Queries.cpp)
 target_include_directories(Sherlock PRIVATE ${S}/SherlockCli/include)
 target_link_libraries(Sherlock PRIVATE Sherlock::Facts nlohmann_json::nlohmann_json Psapi)
 sherlock_compile_options(Sherlock)
