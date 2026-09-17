@@ -5,6 +5,7 @@
 #include <capstone/capstone.h>
 
 #include <utility>
+#include <memory>
 
 namespace Sherlock::Facts
 {
@@ -49,18 +50,24 @@ namespace Sherlock::Facts
         }
     }
 
-    StreamCoverage Disassembler::Stream(std::span<const std::byte> code, std::uint64_t base,
-                                        const std::function<void(const Instruction&)>& onInstruction)
+    Expected<StreamCoverage> Disassembler::Stream(std::span<const std::byte> code, std::uint64_t base,
+                                                  const std::function<void(const Instruction&)>& onInstruction)
     {
         StreamCoverage coverage{0, code.size() / 4};
-        cs_insn*       insn    = ::cs_malloc(_handle);
+        const auto freeInstruction = [](cs_insn* value) { if (value != nullptr) ::cs_free(value, 1); };
+        std::unique_ptr<cs_insn, decltype(freeInstruction)> insn(::cs_malloc(_handle), freeInstruction);
+        if (!insn)
+        {
+            return Fail(DiagnosticCode::Disassembler, Severity::NotVerified, "Disassembler::Stream", "capstone",
+                        "cs_malloc failed", "free memory and retry");
+        }
         const auto*    cursor  = reinterpret_cast<const std::uint8_t*>(code.data());
         std::size_t    left    = code.size();
         std::uint64_t  address = base;
 
         while (left > 0)
         {
-            if (::cs_disasm_iter(_handle, &cursor, &left, &address, insn))
+            if (::cs_disasm_iter(_handle, &cursor, &left, &address, insn.get()))
             {
                 coverage.Decoded += insn->size / 4;
                 onInstruction(Instruction{insn->address, std::string_view(insn->mnemonic), std::string_view(insn->op_str)});
@@ -76,7 +83,6 @@ namespace Sherlock::Facts
                 break;
             }
         }
-        ::cs_free(insn, 1);
         return coverage;
     }
 }

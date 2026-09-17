@@ -12,7 +12,8 @@ namespace Sherlock::Store
     inline constexpr int kSchemaVersion = 1;
 
     Expected<void> CreateCatalog(Database& db, std::string_view build, std::string_view cacheUuid);
-    Expected<void> CreateImageStore(Database& db, std::string_view imagePath);
+    Expected<void> CreateImageStore(Database& db, std::string_view imagePath, std::string_view cacheUuid = {});
+    Expected<std::string> ReadMeta(Database& db, std::string_view key);
     Expected<void> CreateImageIndexes(Database& db);
     Expected<void> CheckSchema(Database& db, std::string_view kind);
 }

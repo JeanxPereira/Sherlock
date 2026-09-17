@@ -63,14 +63,16 @@ def image_db(store: Path, catalog: sqlite3.Connection, path: str) -> sqlite3.Con
 
 def check_owner(sherlock: Path, cache_dir: Path, store: Path, build: str) -> bool:
     ok = True
-    for address in (0x240622d98, 0x27c198c20):
+    for address, segment in ((0x240622d98, "__TEXT"), (0x27c198c20, "__AUTH_CONST")):
         py = subprocess.run([sys.executable, str(REPO / "References" / "scripts" / "dsc_reader.py"),
                              "--build", build, "--who", "0x%x" % address], capture_output=True, text=True)
         sh = subprocess.run([str(sherlock), "q", "0x%x" % address, "--cache", str(cache_dir), "--store", str(store)],
                             capture_output=True, text=True)
-        py_hit = "DesignLibrary" in py.stdout
-        sh_hit = "DesignLibrary" in sh.stdout
-        got = py_hit and sh_hit
+        py_hit = py.returncode == 0 and "DesignLibrary" in py.stdout
+        owner_lines = [line for line in sh.stdout.splitlines() if line.startswith("owner: ")]
+        sh_hit = (sh.returncode in (0, 3) and len(owner_lines) == 1 and
+                  owner_lines[0].endswith("/DesignLibrary " + segment))
+        got = py_hit and sh_hit and "NOT VERIFIED" not in sh.stdout
         print("%-4s owner 0x%x -- dsc_reader %s, Sherlock %s"
               % ("PASS" if got else "FAIL", address, "DesignLibrary" if py_hit else "?",
                  "DesignLibrary" if sh_hit else "?"))

@@ -7,7 +7,11 @@
 #include <Store/Database.h>
 #include <Store/Schema.h>
 
+#include <windows.h>
+
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <mutex>
 #include <queue>
@@ -16,6 +20,7 @@
 
 namespace Sherlock::Facts
 {
+    using Foundation::Diagnostic;
     using Foundation::DiagnosticCode;
     using Foundation::Fail;
     using Foundation::Severity;
@@ -24,20 +29,23 @@ namespace Sherlock::Facts
     {
         struct WorkItem
         {
-            std::string           Path;
-            std::string           Tower;
-            std::uint64_t         Header = 0;
+            std::string Path;
+            std::string Tower;
+            std::uint64_t Header = 0;
             std::filesystem::path StorePath;
-            std::string           Basename;
+            std::string Basename;
+            bool HadUsableStore = false;
         };
 
         struct WorkResult
         {
-            WorkItem      Item;
-            bool          Ok = false;
-            std::string   Reason;
+            WorkItem Item;
+            bool Ok = false;
+            std::optional<Diagnostic> Error;
             std::uint64_t Decoded = 0;
-            std::uint64_t Total   = 0;
+            std::uint64_t Total = 0;
+            std::uintmax_t Bytes = 0;
+            double Seconds = 0;
         };
 
         std::string BasenameOf(const std::string& path)
@@ -45,238 +53,265 @@ namespace Sherlock::Facts
             const auto slash = path.rfind('/');
             return slash == std::string::npos ? path : path.substr(slash + 1);
         }
+
+        Expected<bool> ValidImageStore(const std::filesystem::path& path, std::string_view image,
+                                       std::string_view cacheUuid)
+        {
+            if (!std::filesystem::is_regular_file(path)) return false;
+            auto db = Store::Database::Open(path, Store::Database::Mode::ReadOnly);
+            if (!db) return false;
+            if (auto ok = Store::CheckSchema(*db, "Image"); !ok) return false;
+            const auto actualImage = Store::ReadMeta(*db, "ImagePath");
+            const auto actualUuid = Store::ReadMeta(*db, "CacheUuid");
+            return actualImage && actualUuid && *actualImage == image && *actualUuid == cacheUuid;
+        }
+
+        Expected<void> ReplaceFile(const std::filesystem::path& source, const std::filesystem::path& destination)
+        {
+            if (!::MoveFileExW(source.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildFacts::ReplaceFile", destination.string(),
+                            "the completed image store could not replace the prior store", "check the corpus disk",
+                            Foundation::LastSystemError());
+            }
+            return {};
+        }
     }
 
     Expected<BuildReport> BuildFacts(const DyldSharedCache::Cache& cache, std::string_view build,
                                      const BuildOptions& options)
     {
-        std::error_code ignored;
-        std::filesystem::create_directories(options.Store / "Images", ignored);
+        if (options.Store.empty())
+        {
+            return Fail(DiagnosticCode::Usage, Severity::NotVerified, "BuildFacts", "--store",
+                        "no store directory was provided", "pass --store or set SHERLOCK_STORE");
+        }
+        std::error_code fsError;
+        std::filesystem::create_directories(options.Store / "Images", fsError);
+        if (fsError)
+        {
+            return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildFacts", options.Store.string(),
+                        "the store directory cannot be created", "check the corpus disk", fsError.message());
+        }
 
         const auto catalogPath = options.Store / "Catalog.db";
-        auto       catalog     = Store::Database::Open(catalogPath, Store::Database::Mode::ReadWrite);
-        if (!catalog)
-        {
-            return std::unexpected(catalog.error());
-        }
+        auto catalog = Store::Database::Open(catalogPath, Store::Database::Mode::ReadWrite);
+        if (!catalog) return std::unexpected(catalog.error());
         const auto tableCount = catalog->ScalarInt("SELECT count(*) FROM sqlite_master WHERE name = 'Meta'");
-        if (!tableCount)
-        {
-            return std::unexpected(tableCount.error());
-        }
+        if (!tableCount) return std::unexpected(tableCount.error());
         if (*tableCount == 0)
         {
-            if (auto ok = Store::CreateCatalog(*catalog, build, cache.Uuid()); !ok)
-            {
-                return std::unexpected(ok.error());
-            }
+            if (auto ok = Store::CreateCatalog(*catalog, build, cache.Uuid()); !ok) return std::unexpected(ok.error());
         }
         else
         {
-            if (auto ok = Store::CheckSchema(*catalog, "Catalog"); !ok)
-            {
-                return std::unexpected(ok.error());
-            }
-            auto uuidQuery = catalog->Prepare("SELECT Value FROM Meta WHERE Key = 'CacheUuid'");
-            if (!uuidQuery)
-            {
-                return std::unexpected(uuidQuery.error());
-            }
-            const auto row = uuidQuery->Step();
-            if (!row)
-            {
-                return std::unexpected(row.error());
-            }
-            if (!*row || uuidQuery->Text(0) != cache.Uuid())
+            if (auto ok = Store::CheckSchema(*catalog, "Catalog"); !ok) return std::unexpected(ok.error());
+            const auto uuid = Store::ReadMeta(*catalog, "CacheUuid");
+            const auto storedBuild = Store::ReadMeta(*catalog, "Build");
+            if (!uuid) return std::unexpected(uuid.error());
+            if (!storedBuild) return std::unexpected(storedBuild.error());
+            if (*uuid != cache.Uuid() || *storedBuild != build)
             {
                 return Fail(DiagnosticCode::Mismatch, Severity::NotVerified, "BuildFacts", catalogPath.string(),
-                            "the catalog's CacheUuid does not match this cache",
+                            "the catalog identity does not match this cache and build",
                             "point --store at this build's own directory");
             }
         }
 
+        BuildReport report;
+        if (options.Images.empty())
+        {
+            return Fail(DiagnosticCode::Usage, Severity::NotVerified, "BuildFacts", "--images",
+                        "no images were requested", "pass --images or --towers");
+        }
+
         std::unordered_map<std::string, int> seen;
-        std::vector<WorkItem>                items;
+        std::vector<WorkItem> items;
         for (const auto& [path, tower] : options.Images)
         {
-            const DyldSharedCache::CacheImage* found = nullptr;
-            for (const auto& candidate : cache.Images())
+            const auto found = cache.FindImage(path);
+            if (!found)
             {
-                if (candidate.Path == path)
-                {
-                    found = &candidate;
-                    break;
-                }
-            }
-            if (found == nullptr)
-            {
+                report.Failed.push_back({path, Severity::Failed, found.error().Format()});
                 continue;
             }
-            if (options.Resume)
+
+            std::string file;
+            auto existing = catalog->Prepare("SELECT Name, State FROM Image WHERE Path = ?1");
+            bool factsDone = false;
+            if (!existing) return std::unexpected(existing.error());
+            if (auto ok = existing->Bind(1, path); !ok) return std::unexpected(ok.error());
+            const auto row = existing->Step();
+            if (!row) return std::unexpected(row.error());
+            if (*row)
             {
-                auto state = catalog->Prepare("SELECT State FROM Image WHERE Path = ?1");
-                if (state && state->Bind(1, path))
-                {
-                    const auto has = state->Step();
-                    if (has && *has && state->Text(0) == "FactsDone")
-                    {
-                        continue;
-                    }
-                }
+                file = existing->Text(0);
+                factsDone = existing->Text(1) == "FactsDone";
             }
-            const std::string base  = BasenameOf(path);
-            const int         count = ++seen[base];
-            const std::string file  = count == 1 ? base + ".db" : base + "-" + std::to_string(count) + ".db";
-            // Image.Name carries the store FILE name (with its collision suffix), not the bare basename --
-            // a later process (a query, run cold) reconstructs StorePath from Name alone, never recomputing
-            // which images collided.
-            items.push_back({path, tower, found->Header, options.Store / "Images" / file, file});
+            if (file.empty())
+            {
+                const std::string base = BasenameOf(path);
+                const int count = ++seen[base];
+                file = count == 1 ? base + ".db" : base + "-" + std::to_string(count) + ".db";
+            }
+            const auto storePath = options.Store / "Images" / file;
+            const auto valid = ValidImageStore(storePath, path, cache.Uuid());
+            if (!valid) return std::unexpected(valid.error());
+            if (options.Resume && factsDone && *valid) continue;
+            items.push_back({path, tower, (*found)->Header, storePath, file, factsDone && *valid});
         }
 
         std::queue<WorkItem> pending;
-        for (auto& item : items)
-        {
-            pending.push(item);
-        }
-        std::mutex              queueMutex;
-        std::mutex              resultMutex;
+        for (auto& item : items) pending.push(item);
+        std::mutex queueMutex;
+        std::mutex catalogMutex;
+        std::mutex resultMutex;
         std::vector<WorkResult> results;
+        std::atomic<bool> resourceStop = false;
 
-        const unsigned workerCount =
-            options.Workers != 0 ? options.Workers : std::max(1u, std::thread::hardware_concurrency());
-        std::vector<std::thread> workers;
-        for (unsigned w = 0; w < workerCount; ++w)
+        const auto record = [&](const WorkResult& result) -> Expected<void> {
+            if (!result.Ok && result.Item.HadUsableStore) return {};
+            std::lock_guard<std::mutex> lock(catalogMutex);
+            auto image = catalog->Prepare("INSERT OR REPLACE INTO Image(Path, Name, Tower, Header, State, Reason, FactsVersion) "
+                                          "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)");
+            if (!image) return std::unexpected(image.error());
+            if (auto ok = image->Bind(1, result.Item.Path); !ok) return ok;
+            if (auto ok = image->Bind(2, result.Item.Basename); !ok) return ok;
+            if (result.Item.Tower.empty()) { if (auto ok = image->BindNull(3); !ok) return ok; }
+            else if (auto ok = image->Bind(3, result.Item.Tower); !ok) return ok;
+            if (auto ok = image->Bind(4, static_cast<std::int64_t>(result.Item.Header)); !ok) return ok;
+            if (auto ok = image->Bind(5, std::string_view(result.Ok ? "FactsDone" : "FactsFailed")); !ok) return ok;
+            if (result.Error) { if (auto ok = image->Bind(6, result.Error->Format()); !ok) return ok; }
+            else if (auto ok = image->BindNull(6); !ok) return ok;
+            if (result.Ok) { if (auto ok = image->Bind(7, std::string_view(SHERLOCK_VERSION)); !ok) return ok; }
+            else if (auto ok = image->BindNull(7); !ok) return ok;
+            if (auto step = image->Step(); !step) return std::unexpected(step.error());
+            if (result.Ok)
+            {
+                auto coverage = catalog->Prepare("INSERT OR REPLACE INTO Coverage(Image, Layer, Unit, Read, Total) "
+                                                 "VALUES(?1, 'Facts', 'instructions', ?2, ?3)");
+                if (!coverage) return std::unexpected(coverage.error());
+                if (auto ok = coverage->Bind(1, result.Item.Path); !ok) return ok;
+                if (auto ok = coverage->Bind(2, static_cast<std::int64_t>(result.Decoded)); !ok) return ok;
+                if (auto ok = coverage->Bind(3, static_cast<std::int64_t>(result.Total)); !ok) return ok;
+                if (auto step = coverage->Step(); !step) return std::unexpected(step.error());
+            }
+            return {};
+        };
+
+        const unsigned requestedWorkers = options.Workers != 0 ? options.Workers : std::max(1u, std::thread::hardware_concurrency());
+        const unsigned workerCount = std::min<unsigned>(requestedWorkers, static_cast<unsigned>(items.size()));
+        std::vector<std::jthread> workers;
+        try
         {
-            workers.emplace_back([&]() {
-                for (;;)
-                {
-                    WorkItem item;
+            workers.reserve(workerCount);
+            for (unsigned w = 0; w < workerCount; ++w)
+            {
+                workers.emplace_back([&]() {
+                    for (;;)
                     {
-                        std::lock_guard<std::mutex> lock(queueMutex);
-                        if (pending.empty())
+                        WorkItem item;
                         {
-                            return;
+                            std::lock_guard<std::mutex> lock(queueMutex);
+                            if (pending.empty() || resourceStop) return;
+                            item = std::move(pending.front());
+                            pending.pop();
                         }
-                        item = pending.front();
-                        pending.pop();
-                    }
-
-                    WorkResult result;
-                    result.Item = item;
-
-                    const auto fail = [&](std::string reason) {
-                        result.Reason = std::move(reason);
+                        WorkResult result;
+                        result.Item = item;
+                        const auto started = std::chrono::steady_clock::now();
+                        try
+                        {
+                            std::error_code spaceError;
+                            const auto space = std::filesystem::space(options.Store, spaceError);
+                            if (spaceError || space.available < options.MinimumFreeBytes)
+                            {
+                                result.Error = Diagnostic{DiagnosticCode::Io, Severity::NotVerified, "BuildFacts",
+                                    options.Store.string(), "free disk space is below the configured floor",
+                                    "free corpus disk space or lower the configured floor",
+                                    spaceError ? spaceError.message() : std::string{}};
+                                resourceStop = true;
+                            }
+                            else
+                            {
+                                auto disassembler = Disassembler::Create();
+                                if (!disassembler) result.Error = disassembler.error();
+                                else
+                                {
+                                    auto facts = ExtractImage(cache, {item.Path, item.Header}, *disassembler);
+                                    if (!facts) result.Error = facts.error();
+                                    else
+                                    {
+                                        auto temporary = item.StorePath;
+                                        temporary += ".building";
+                                        std::filesystem::remove(temporary, spaceError);
+                                        std::filesystem::remove(temporary.string() + "-wal", spaceError);
+                                        std::filesystem::remove(temporary.string() + "-shm", spaceError);
+                                        {
+                                            auto db = Store::Database::Open(temporary, Store::Database::Mode::ReadWrite);
+                                            if (!db) result.Error = db.error();
+                                            else if (auto created = Store::CreateImageStore(*db, item.Path, cache.Uuid()); !created) result.Error = created.error();
+                                            else if (auto written = WriteImageFacts(*db, *facts, options.Demangle); !written) result.Error = written.error();
+                                        }
+                                        if (!result.Error)
+                                        {
+                                            if (auto replaced = ReplaceFile(temporary, item.StorePath); !replaced) result.Error = replaced.error();
+                                            else
+                                            {
+                                                result.Ok = true;
+                                                result.Decoded = facts->Coverage.Decoded;
+                                                result.Total = facts->Coverage.Total;
+                                                result.Bytes = std::filesystem::file_size(item.StorePath, spaceError);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch (const std::exception& error)
+                        {
+                            result.Error = Diagnostic{DiagnosticCode::Io, Severity::NotVerified, "BuildFacts::Worker",
+                                item.Path, "an exception escaped image extraction", "inspect the image and retry", error.what()};
+                        }
+                        catch (...)
+                        {
+                            result.Error = Diagnostic{DiagnosticCode::Io, Severity::NotVerified, "BuildFacts::Worker",
+                                item.Path, "an unknown exception escaped image extraction", "inspect the image and retry", {}};
+                        }
+                        result.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+                        if (const auto stored = record(result); !stored && !result.Error)
+                        {
+                            result.Ok = false;
+                            result.Error = stored.error();
+                        }
+                        if (result.Ok && !options.Json)
+                        {
+                            std::printf("%s  FactsDone  coverage %llu/%llu  %llu bytes  %.1fs\n", item.Path.c_str(),
+                                static_cast<unsigned long long>(result.Decoded), static_cast<unsigned long long>(result.Total),
+                                static_cast<unsigned long long>(result.Bytes), result.Seconds);
+                        }
                         std::lock_guard<std::mutex> lock(resultMutex);
                         results.push_back(std::move(result));
-                    };
-
-                    auto disassembler = Disassembler::Create();
-                    if (!disassembler)
-                    {
-                        fail(disassembler.error().Format());
-                        continue;
                     }
-                    auto facts = ExtractImage(cache, DyldSharedCache::CacheImage{item.Path, item.Header}, *disassembler);
-                    if (!facts)
-                    {
-                        fail(facts.error().Format());
-                        continue;
-                    }
-                    auto db = Store::Database::Open(item.StorePath, Store::Database::Mode::ReadWrite);
-                    if (!db)
-                    {
-                        fail(db.error().Format());
-                        continue;
-                    }
-                    if (auto ok = Store::CreateImageStore(*db, item.Path); !ok)
-                    {
-                        fail(ok.error().Format());
-                        continue;
-                    }
-                    if (auto ok = WriteImageFacts(*db, *facts, options.Demangle); !ok)
-                    {
-                        fail(ok.error().Format());
-                        continue;
-                    }
-
-                    result.Ok = true;
-                    // Facts::StreamCoverage already counts instruction words (Stream divides by 4 as it
-                    // scans), matching litref.py's own unit -- no second division belongs here.
-                    result.Decoded = facts->Coverage.Decoded;
-                    result.Total   = facts->Coverage.Total;
-                    std::printf("%s  FactsDone  coverage %llu/%llu\n", item.Path.c_str(),
-                               static_cast<unsigned long long>(result.Decoded),
-                               static_cast<unsigned long long>(result.Total));
-                    std::lock_guard<std::mutex> lock(resultMutex);
-                    results.push_back(std::move(result));
-                }
-            });
+                });
+            }
         }
-        for (auto& worker : workers)
+        catch (const std::exception& error)
         {
-            worker.join();
+            resourceStop = true;
+            return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildFacts", "workers",
+                        "worker creation failed", "reduce --workers and retry", error.what());
         }
+        workers.clear();
 
-        auto upsertImage = catalog->Prepare("INSERT OR REPLACE INTO Image(Path, Name, Tower, Header, State, Reason) "
-                                            "VALUES(?1, ?2, ?3, ?4, ?5, ?6)");
-        auto upsertCoverage = catalog->Prepare(
-            "INSERT OR REPLACE INTO Coverage(Image, Layer, Unit, Read, Total) VALUES(?1, 'Facts', 'instructions', ?2, ?3)");
-        if (!upsertImage || !upsertCoverage)
-        {
-            return std::unexpected((!upsertImage ? upsertImage : upsertCoverage).error());
-        }
-
-        BuildReport report;
         for (const auto& result : results)
         {
-            if (auto ok = upsertImage->Bind(1, result.Item.Path); !ok) return std::unexpected(ok.error());
-            if (auto ok = upsertImage->Bind(2, result.Item.Basename); !ok) return std::unexpected(ok.error());
-            if (result.Item.Tower.empty())
-            {
-                if (auto ok = upsertImage->BindNull(3); !ok) return std::unexpected(ok.error());
-            }
-            else if (auto ok = upsertImage->Bind(3, result.Item.Tower); !ok)
-            {
-                return std::unexpected(ok.error());
-            }
-            if (auto ok = upsertImage->Bind(4, static_cast<std::int64_t>(result.Item.Header)); !ok)
-            {
-                return std::unexpected(ok.error());
-            }
-            if (auto ok = upsertImage->Bind(5, std::string_view(result.Ok ? "FactsDone" : "FactsFailed")); !ok)
-            {
-                return std::unexpected(ok.error());
-            }
             if (result.Ok)
             {
-                if (auto ok = upsertImage->BindNull(6); !ok) return std::unexpected(ok.error());
-            }
-            else if (auto ok = upsertImage->Bind(6, result.Reason); !ok)
-            {
-                return std::unexpected(ok.error());
-            }
-            if (auto ok = upsertImage->Step(); !ok) return std::unexpected(ok.error());
-            if (auto ok = upsertImage->Reset(); !ok) return std::unexpected(ok.error());
-
-            if (result.Ok)
-            {
-                if (auto ok = upsertCoverage->Bind(1, result.Item.Path); !ok) return std::unexpected(ok.error());
-                if (auto ok = upsertCoverage->Bind(2, static_cast<std::int64_t>(result.Decoded)); !ok)
-                {
-                    return std::unexpected(ok.error());
-                }
-                if (auto ok = upsertCoverage->Bind(3, static_cast<std::int64_t>(result.Total)); !ok)
-                {
-                    return std::unexpected(ok.error());
-                }
-                if (auto ok = upsertCoverage->Step(); !ok) return std::unexpected(ok.error());
-                if (auto ok = upsertCoverage->Reset(); !ok) return std::unexpected(ok.error());
                 ++report.Done;
+                report.Completed.push_back({result.Item.Path, result.Bytes, result.Seconds, result.Decoded, result.Total});
             }
-            else
-            {
-                report.Failed.push_back({result.Item.Path, result.Reason});
-            }
+            else if (result.Error) report.Failed.push_back({result.Item.Path, result.Error->Level, result.Error->Format()});
         }
         return report;
     }

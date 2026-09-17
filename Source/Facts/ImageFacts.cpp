@@ -46,13 +46,13 @@ namespace Sherlock::Facts
         facts.Segments = parsed->Segments();
         facts.Sections = parsed->Sections();
 
-        if (const auto symbols = parsed->Symbols(cache); symbols)
-        {
-            facts.Symbols = *symbols;
-        }
+        const auto symbols = parsed->Symbols(cache);
+        if (!symbols) return std::unexpected(symbols.error());
+        facts.Symbols = *symbols;
 
         const auto rawStarts = parsed->FunctionStarts(cache);
-        std::vector<std::uint64_t> starts = rawStarts ? *rawStarts : std::vector<std::uint64_t>{text->Address};
+        if (!rawStarts) return std::unexpected(rawStarts.error());
+        std::vector<std::uint64_t> starts = *rawStarts;
         std::sort(starts.begin(), starts.end());
         for (std::size_t i = 0; i < starts.size(); ++i)
         {
@@ -70,7 +70,7 @@ namespace Sherlock::Facts
         std::unordered_map<std::uint64_t, std::optional<std::uint64_t>> islandCache;
         std::optional<Foundation::Diagnostic>                            islandError;
 
-        facts.Coverage = disassembler.Stream(*bytes, text->Address, [&](const Instruction& ins) {
+        const auto coverage = disassembler.Stream(*bytes, text->Address, [&](const Instruction& ins) {
             const std::uint64_t caller = CallerOf(facts.Functions, ins.Address);
 
             std::vector<LiteralRead> reads;
@@ -140,6 +140,12 @@ namespace Sherlock::Facts
             }
             facts.Calls.push_back(std::move(row));
         });
+
+        if (!coverage)
+        {
+            return std::unexpected(coverage.error());
+        }
+        facts.Coverage = *coverage;
 
         if (islandError)
         {

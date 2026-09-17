@@ -40,8 +40,8 @@ namespace Sherlock::Facts
 
         // Every decodable instruction word in `code`; a word capstone refuses is skipped (4 bytes) and the stream
         // resumes, never stops. Coverage counts instruction WORDS, the unit litref.py prints.
-        StreamCoverage Stream(std::span<const std::byte> code, std::uint64_t base,
-                              const std::function<void(const Instruction&)>& onInstruction);
+        Expected<StreamCoverage> Stream(std::span<const std::byte> code, std::uint64_t base,
+                                        const std::function<void(const Instruction&)>& onInstruction);
 
     private:
         explicit Disassembler(csh handle) noexcept : _handle(handle) {}

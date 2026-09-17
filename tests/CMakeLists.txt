@@ -90,3 +90,7 @@ set_tests_properties(Sherlock.Parity PROPERTIES FIXTURES_REQUIRED SherlockStore 
 add_test(NAME Sherlock.ParityGates
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/ParityGates.py
                 ${CMAKE_CURRENT_BINARY_DIR}/ParityGateScratch)
+
+add_test(NAME Sherlock.FinalFixGates
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/FinalFixGates.py
+                $<TARGET_FILE:Sherlock> ${CMAKE_CURRENT_BINARY_DIR}/FinalFixGateScratch)

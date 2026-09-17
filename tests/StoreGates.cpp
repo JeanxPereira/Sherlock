@@ -26,7 +26,7 @@ namespace
         const auto path = Fresh("SherlockStoreGate.db");
         auto db = Store::Database::Open(path, Store::Database::Mode::ReadWrite);
         Expect(db.has_value(), "a new database opens read-write");
-        Expect(Store::CreateImageStore(*db, "/usr/lib/test.dylib").has_value(), "the image schema is created");
+        Expect(Store::CreateImageStore(*db, "/usr/lib/test.dylib", "test-cache").has_value(), "the image schema is created");
         {
             auto tx = Store::Transaction::Begin(*db);
             Expect(db->Execute("INSERT INTO Function VALUES(1, 4, 'FunctionStarts')").has_value(), "insert inside a transaction");
@@ -71,7 +71,7 @@ namespace
         const auto path = Fresh("SherlockHandleGate.db");
         {
             auto db = Store::Database::Open(path, Store::Database::Mode::ReadWrite);
-            Expect(Store::CreateImageStore(*db, "/usr/lib/test.dylib").has_value(), "schema");
+            Expect(Store::CreateImageStore(*db, "/usr/lib/test.dylib", "test-cache").has_value(), "schema");
         }
         DWORD before = 0;
         ::GetProcessHandleCount(::GetCurrentProcess(), &before);

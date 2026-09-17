@@ -22,14 +22,31 @@ namespace Sherlock::Facts
         std::filesystem::path                                       Store;
         std::vector<std::pair<std::string, std::string>>             Images; // path, tower
         unsigned                                                     Workers = 0;
+        std::uintmax_t                                                MinimumFreeBytes = 1024ull * 1024ull * 1024ull;
         bool                                                         Resume  = false;
+        bool                                                         Json    = false;
         std::function<std::optional<std::string>(std::string_view)>  Demangle;
     };
 
     struct BuildReport
     {
+        struct CompletedImage
+        {
+            std::string Path;
+            std::uintmax_t Bytes = 0;
+            double Seconds = 0;
+            std::uint64_t Decoded = 0;
+            std::uint64_t Total = 0;
+        };
         std::size_t                                       Done = 0;
-        std::vector<std::pair<std::string, std::string>>  Failed; // path, reason
+        std::vector<CompletedImage>                       Completed;
+        struct Failure
+        {
+            std::string Path;
+            Foundation::Severity Level = Foundation::Severity::Failed;
+            std::string Reason;
+        };
+        std::vector<Failure> Failed;
     };
 
     Expected<BuildReport> BuildFacts(const DyldSharedCache::Cache& cache, std::string_view build,

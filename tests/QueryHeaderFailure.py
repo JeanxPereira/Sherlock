@@ -9,9 +9,9 @@ import tempfile
 
 def create_catalog(path: pathlib.Path, scenario: str) -> str:
     expected_by_scenario = {
-        "meta-prepare": ("Database::Prepare", "no such table: Meta"),
-        "meta-step": ("Statement::Step", "integer overflow"),
-        "images": ("Database::Prepare", "no such table: Image"),
+        "meta-prepare": ("Mismatch in CheckSchema", "no Sherlock schema"),
+        "meta-step": ("Mismatch in CheckSchema", "expected Catalog schema 1"),
+        "images": ("Mismatch in CheckSchema", "expected Catalog schema 1"),
     }
     expected = expected_by_scenario[scenario]
     catalog = sqlite3.connect(path)

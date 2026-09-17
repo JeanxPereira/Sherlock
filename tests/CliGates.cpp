@@ -59,6 +59,37 @@ namespace
             const auto invocation = Cli::ParseArguments(2, const_cast<char**>(argv));
             Expect(invocation.has_value() && invocation->Command == "version", "--version is its own command");
         }
+        for (const char* value : {"nope", "4junk", "-1", "999999999999999999999"})
+        {
+            const char* argv[] = {"Sherlock", "build", "facts", "--workers", value};
+            bool threw = false;
+            try
+            {
+                const auto invocation = Cli::ParseArguments(5, const_cast<char**>(argv));
+                Expect(!invocation.has_value() && invocation.error().Code == DiagnosticCode::Usage,
+                       "invalid --workers is a Usage diagnostic");
+            }
+            catch (...)
+            {
+                threw = true;
+            }
+            Expect(!threw, "invalid --workers never escapes as an exception");
+        }
+        {
+            const char* argv[] = {"Sherlock", "refs", "0x1", "--to", "0x20junk"};
+            bool threw = false;
+            try
+            {
+                const auto invocation = Cli::ParseArguments(5, const_cast<char**>(argv));
+                Expect(!invocation.has_value() && invocation.error().Code == DiagnosticCode::Usage,
+                       "invalid --to is a Usage diagnostic");
+            }
+            catch (...)
+            {
+                threw = true;
+            }
+            Expect(!threw, "invalid --to never escapes as an exception");
+        }
     }
 
     void GateTowers()

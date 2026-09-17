@@ -25,6 +25,7 @@ namespace Sherlock::Cli
         bool                         Json      = false;
         bool                         Resume    = false;
         unsigned                     Workers   = 0;
+        std::uint64_t                MinimumFreeBytes = 1024ull * 1024ull * 1024ull;
         std::optional<std::uint64_t> To;
     };
 

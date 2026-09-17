@@ -3,6 +3,8 @@
 #include <SherlockCli/Arguments.h>
 
 #include <cstdlib>
+#include <charconv>
+#include <limits>
 
 namespace Sherlock::Cli
 {
@@ -12,6 +14,28 @@ namespace Sherlock::Cli
 
     namespace
     {
+        template <class T>
+        Expected<T> ParseUnsigned(std::string_view text, int base, std::string_view flag)
+        {
+            if (text.empty() || text.front() == '-')
+            {
+                return Fail(DiagnosticCode::Usage, Severity::NotVerified, "ParseArguments", std::string(flag),
+                            "the value is not an unsigned integer", "pass a complete numeric value");
+            }
+            if (base == 16 && text.starts_with("0x"))
+            {
+                text.remove_prefix(2);
+            }
+            T value{};
+            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value, base);
+            if (error != std::errc{} || end != text.data() + text.size())
+            {
+                return Fail(DiagnosticCode::Usage, Severity::NotVerified, "ParseArguments", std::string(flag),
+                            "the value is not a complete integer", "pass a complete numeric value");
+            }
+            return value;
+        }
+
         std::filesystem::path DefaultTowersPath()
         {
             std::filesystem::path dir = std::filesystem::current_path();
@@ -111,13 +135,30 @@ namespace Sherlock::Cli
             {
                 const auto v = next();
                 if (!v) return std::unexpected(v.error());
-                invocation.Workers = static_cast<unsigned>(std::stoul(*v));
+                const auto workers = ParseUnsigned<unsigned>(*v, 10, arg);
+                if (!workers || *workers == 0 || *workers > 256)
+                {
+                    return workers ? Fail(DiagnosticCode::Usage, Severity::NotVerified, "ParseArguments", arg,
+                                          "worker count is outside 1..256", "pass a worker count from 1 through 256")
+                                   : std::unexpected(workers.error());
+                }
+                invocation.Workers = *workers;
             }
             else if (arg == "--to")
             {
                 const auto v = next();
                 if (!v) return std::unexpected(v.error());
-                invocation.To = std::stoull(*v, nullptr, 16);
+                const auto to = ParseUnsigned<std::uint64_t>(*v, 16, arg);
+                if (!to) return std::unexpected(to.error());
+                invocation.To = *to;
+            }
+            else if (arg == "--min-free-bytes")
+            {
+                const auto v = next();
+                if (!v) return std::unexpected(v.error());
+                const auto bytes = ParseUnsigned<std::uint64_t>(*v, 10, arg);
+                if (!bytes) return std::unexpected(bytes.error());
+                invocation.MinimumFreeBytes = *bytes;
             }
             else if (arg.starts_with("--"))
             {

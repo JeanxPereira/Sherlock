@@ -5,6 +5,7 @@
 #include "SherlockHarness.h"
 
 #include <array>
+#include <cstring>
 #include <fstream>
 
 using namespace Sherlock;
@@ -63,6 +64,33 @@ namespace
                "a file without the dyld_v1 magic is NOT VERIFIED");
         std::filesystem::remove_all(dir);
     }
+
+    void GateRefusesTruncatedRecognizedHeader()
+    {
+        const auto dir = std::filesystem::temp_directory_path() / "SherlockTruncatedCache";
+        std::filesystem::create_directories(dir);
+        {
+            std::array<char, 32> bytes{};
+            std::memcpy(bytes.data(), "dyld_v1  arm64e", 16);
+            const std::uint32_t mappingOffset = 0x200;
+            std::memcpy(bytes.data() + 16, &mappingOffset, sizeof(mappingOffset));
+            std::ofstream out(dir / "dyld_shared_cache_arm64e", std::ios::binary);
+            out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        }
+        bool threw = false;
+        try
+        {
+            const auto opened = DyldSharedCache::Cache::Open(dir);
+            Expect(!opened.has_value() && opened.error().Code == DiagnosticCode::Malformed,
+                   "a truncated recognized cache header is Malformed");
+        }
+        catch (...)
+        {
+            threw = true;
+        }
+        Expect(!threw, "a truncated recognized cache header never escapes as an exception");
+        std::filesystem::remove_all(dir);
+    }
 }
 
 int main()
@@ -79,6 +107,7 @@ int main()
         GateRead(*cache);
         GatePointers(*cache);
         GateRefusesForeignDirectory();
+        GateRefusesTruncatedRecognizedHeader();
     }
     catch (const std::exception& e)
     {

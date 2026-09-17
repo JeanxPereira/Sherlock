@@ -25,6 +25,40 @@ using namespace Sherlock;
 
 namespace
 {
+    std::string JsonEscape(std::string_view text)
+    {
+        std::string escaped;
+        for (const char ch : text)
+        {
+            switch (ch)
+            {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped += ch; break;
+            }
+        }
+        return escaped;
+    }
+
+    void PrintVerdict(const Cli::Verdict& verdict, bool json)
+    {
+        if (!json)
+        {
+            std::printf("%s\n", Cli::FormatVerdict(verdict).c_str());
+            return;
+        }
+        const char* kind = verdict.Kind == Cli::VerdictKind::Found ? "FOUND" :
+                           verdict.Kind == Cli::VerdictKind::Empty ? "EMPTY" :
+                           verdict.Kind == Cli::VerdictKind::Partial ? "PARTIAL" : "NOT VERIFIED";
+        const auto why = JsonEscape(verdict.Why);
+        std::printf("{\"verdict\":\"%s\",\"count\":%zu,\"coverage\":{\"read\":%llu,\"total\":%llu},\"reason\":\"%s\"}\n",
+                    kind, verdict.Count, static_cast<unsigned long long>(verdict.Read),
+                    static_cast<unsigned long long>(verdict.Total), why.c_str());
+    }
+
     std::optional<std::uint64_t> ParseHexAddress(std::string_view text)
     {
         if (text.empty())
@@ -44,6 +78,13 @@ namespace
 
     int RunBuildFacts(const Cli::Invocation& invocation)
     {
+        if (invocation.Cache.empty() || invocation.Store.empty())
+        {
+            PrintVerdict({Cli::VerdictKind::NotVerified, 0,
+                          "build facts requires --cache and --store (or their SHERLOCK_* variables)", 0, 0},
+                         invocation.Json);
+            return 2;
+        }
         auto build = Cli::ReadTowersBuild(invocation.Towers);
         if (!build)
         {
@@ -66,7 +107,9 @@ namespace
         Facts::BuildOptions options;
         options.Store   = invocation.Store;
         options.Workers = invocation.Workers;
+        options.MinimumFreeBytes = invocation.MinimumFreeBytes;
         options.Resume  = invocation.Resume;
+        options.Json    = invocation.Json;
 
         auto demangler = Cli::Demangler::Load(Cli::DefaultDemanglerPath());
         if (demangler)
@@ -104,16 +147,35 @@ namespace
 
         if (!report)
         {
-            std::printf("NOT VERIFIED: %s\n", report.error().Format().c_str());
+            PrintVerdict({Cli::VerdictKind::NotVerified, 0, report.error().Format(), 0, 0}, invocation.Json);
             return 2;
         }
-        for (const auto& [path, reason] : report->Failed)
+        bool notVerified = false;
+        for (const auto& failure : report->Failed)
         {
-            std::printf("FAILED  %s  %s\n", path.c_str(), reason.c_str());
+            notVerified = notVerified || failure.Level == Foundation::Severity::NotVerified;
+            if (!invocation.Json)
+                std::printf("%s  %s  %s\n", failure.Level == Foundation::Severity::NotVerified ? "NOT VERIFIED" : "FAILED",
+                            failure.Path.c_str(), failure.Reason.c_str());
         }
-        std::printf("built %zu image(s), %zu failed, %.1fs, peak %.1f MiB\n", report->Done, report->Failed.size(),
-                   elapsed, peakMiB);
-        return report->Failed.empty() ? 0 : 1;
+        if (invocation.Json)
+        {
+            std::printf("{\"built\":%zu,\"failed\":%zu,\"elapsed_seconds\":%.3f,\"peak_mib\":%.3f,\"not_verified\":%s,\"images\":[",
+                        report->Done, report->Failed.size(), elapsed, peakMiB, notVerified ? "true" : "false");
+            for (std::size_t i = 0; i < report->Completed.size(); ++i)
+            {
+                const auto& image = report->Completed[i];
+                const auto path = JsonEscape(image.Path);
+                std::printf("%s{\"path\":\"%s\",\"bytes\":%llu,\"seconds\":%.3f,\"coverage\":{\"read\":%llu,\"total\":%llu}}",
+                            i == 0 ? "" : ",", path.c_str(), static_cast<unsigned long long>(image.Bytes), image.Seconds,
+                            static_cast<unsigned long long>(image.Decoded), static_cast<unsigned long long>(image.Total));
+            }
+            std::printf("]}\n");
+        }
+        else
+            std::printf("built %zu image(s), %zu failed, %.1fs, peak %.1f MiB\n", report->Done, report->Failed.size(),
+                        elapsed, peakMiB);
+        return report->Failed.empty() ? 0 : (notVerified ? 2 : 1);
     }
 }
 
@@ -135,6 +197,27 @@ int main(int argc, char** argv)
         return RunBuildFacts(*invocation);
     }
 
+    const bool queryCommand = invocation->Command == "q" || invocation->Command == "callers" ||
+                              invocation->Command == "calls" || invocation->Command == "refs";
+    if ((queryCommand || invocation->Command == "status") && invocation->Store.empty())
+    {
+        PrintVerdict({Cli::VerdictKind::NotVerified, 0, "no store path; pass --store or set SHERLOCK_STORE", 0, 0},
+                     invocation->Json);
+        return 2;
+    }
+    if ((invocation->Command == "q" || invocation->Command == "calls" || invocation->Command == "refs") &&
+        invocation->Cache.empty())
+    {
+        PrintVerdict({Cli::VerdictKind::NotVerified, 0, "no cache path; pass --cache or set SHERLOCK_CACHE", 0, 0},
+                     invocation->Json);
+        return 2;
+    }
+    if (queryCommand && invocation->Positional.empty())
+    {
+        PrintVerdict({Cli::VerdictKind::NotVerified, 0, "no address or symbol given", 0, 0}, invocation->Json);
+        return 2;
+    }
+
     Cli::QueryEnvironment env{invocation->Store, invocation->Full, invocation->Json};
     const auto printHeader = [&]() {
         const auto header = Cli::PrintHeader(env, "");
@@ -143,7 +226,7 @@ int main(int argc, char** argv)
             return true;
         }
         const Cli::Verdict verdict{Cli::VerdictKind::NotVerified, 0, header.error().Format(), 0, 0};
-        std::printf("%s\n", Cli::FormatVerdict(verdict).c_str());
+        PrintVerdict(verdict, invocation->Json);
         return false;
     };
     if (invocation->Command == "status")
@@ -153,9 +236,9 @@ int main(int argc, char** argv)
             return 2;
         }
         const auto verdict = Cli::RunStatus(env);
-        std::printf("demangler: %s\n",
+        if (!invocation->Json) std::printf("demangler: %s\n",
                     Cli::Demangler::Load(Cli::DefaultDemanglerPath()).has_value() ? "available" : "absent");
-        std::printf("%s\n", Cli::FormatVerdict(verdict).c_str());
+        PrintVerdict(verdict, invocation->Json);
         return Cli::ExitCode(verdict);
     }
     if (invocation->Command == "q" || invocation->Command == "callers" || invocation->Command == "calls" ||
@@ -165,27 +248,22 @@ int main(int argc, char** argv)
         {
             return 2;
         }
-        if (invocation->Positional.empty())
-        {
-            std::printf("verdict: NOT VERIFIED no address or symbol given\n");
-            return 2;
-        }
         if (invocation->Command == "callers")
         {
             const auto address = ParseHexAddress(invocation->Positional.front());
             if (!address)
             {
-                std::printf("verdict: NOT VERIFIED invalid address %s\n", invocation->Positional.front().c_str());
+                PrintVerdict({Cli::VerdictKind::NotVerified, 0, "invalid address " + invocation->Positional.front(), 0, 0}, invocation->Json);
                 return 2;
             }
             const auto verdict = Cli::RunCallers(env, *address);
-            std::printf("%s\n", Cli::FormatVerdict(verdict).c_str());
+            PrintVerdict(verdict, invocation->Json);
             return Cli::ExitCode(verdict);
         }
         auto cache = DyldSharedCache::Cache::Open(invocation->Cache);
         if (!cache)
         {
-            std::printf("verdict: NOT VERIFIED %s\n", cache.error().Format().c_str());
+            PrintVerdict({Cli::VerdictKind::NotVerified, 0, cache.error().Format(), 0, 0}, invocation->Json);
             return 2;
         }
         Cli::Verdict verdict;
@@ -198,7 +276,7 @@ int main(int argc, char** argv)
             const auto address = ParseHexAddress(invocation->Positional.front());
             if (!address)
             {
-                std::printf("verdict: NOT VERIFIED invalid address %s\n", invocation->Positional.front().c_str());
+                PrintVerdict({Cli::VerdictKind::NotVerified, 0, "invalid address " + invocation->Positional.front(), 0, 0}, invocation->Json);
                 return 2;
             }
             if (invocation->Command == "calls")
@@ -211,7 +289,7 @@ int main(int argc, char** argv)
                 verdict = Cli::RunRefs(*cache, env, *address, endAddress);
             }
         }
-        std::printf("%s\n", Cli::FormatVerdict(verdict).c_str());
+        PrintVerdict(verdict, invocation->Json);
         return Cli::ExitCode(verdict);
     }
 

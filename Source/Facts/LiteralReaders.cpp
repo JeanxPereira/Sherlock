@@ -27,7 +27,7 @@ namespace Sherlock::Facts
             return false;
         }
 
-        std::optional<std::uint64_t> ParseImmediate(std::string_view text)
+        std::optional<std::int64_t> ParseImmediate(std::string_view text)
         {
             while (!text.empty() && text.front() == ' ')
             {
@@ -38,11 +38,23 @@ namespace Sherlock::Facts
                 return std::nullopt;
             }
             text.remove_prefix(1);
-            std::uint64_t value  = 0;
+            std::int64_t value   = 0;
             const int     base   = (text.size() > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) ? 16 : 10;
             const auto    digits = base == 16 ? text.substr(2) : text;
             const auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), value, base);
-            return ec == std::errc{} ? std::optional<std::uint64_t>(value) : std::nullopt;
+            return ec == std::errc{} && ptr == digits.data() + digits.size() ? std::optional<std::int64_t>(value)
+                                                                              : std::nullopt;
+        }
+
+        std::optional<std::uint64_t> AddOffset(std::uint64_t base, std::int64_t offset)
+        {
+            if (offset < 0)
+            {
+                const auto magnitude = static_cast<std::uint64_t>(-(offset + 1)) + 1;
+                return magnitude <= base ? std::optional<std::uint64_t>(base - magnitude) : std::nullopt;
+            }
+            const auto positive = static_cast<std::uint64_t>(offset);
+            return positive <= UINT64_MAX - base ? std::optional<std::uint64_t>(base + positive) : std::nullopt;
         }
 
         std::vector<std::string_view> SplitOnComma(std::string_view text)
@@ -88,7 +100,7 @@ namespace Sherlock::Facts
             }
             else
             {
-                _page[reg] = *value;
+                _page[reg] = static_cast<std::uint64_t>(*value);
             }
             return;
         }
@@ -114,7 +126,10 @@ namespace Sherlock::Facts
                 const auto        it  = _page.find(n);
                 if (it != _page.end() && imm)
                 {
-                    out.push_back({ins.Address, it->second + *imm, "add", d});
+                    if (const auto target = AddOffset(it->second, *imm))
+                    {
+                        out.push_back({ins.Address, *target, "add", d});
+                    }
                 }
                 _page.erase(d);
                 return;
@@ -129,11 +144,14 @@ namespace Sherlock::Facts
                 const auto                    inside = ins.Operands.substr(open + 1, close - open - 1);
                 const auto                    parts  = SplitOnComma(inside);
                 const std::string              n(parts.empty() ? std::string_view{} : parts[0]);
-                const auto                     imm    = parts.size() > 1 ? ParseImmediate(parts[1]) : std::optional<std::uint64_t>(0);
+                const auto                     imm    = parts.size() > 1 ? ParseImmediate(parts[1]) : std::optional<std::int64_t>(0);
                 const auto                     it     = _page.find(n);
                 if (it != _page.end() && imm)
                 {
-                    out.push_back({ins.Address, it->second + *imm, std::string(mnemonic), destination});
+                    if (const auto target = AddOffset(it->second, *imm))
+                    {
+                        out.push_back({ins.Address, *target, std::string(mnemonic), destination});
+                    }
                 }
             }
         }

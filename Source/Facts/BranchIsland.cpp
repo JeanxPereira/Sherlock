@@ -35,7 +35,7 @@ namespace Sherlock::Facts
             std::optional<Foundation::Diagnostic> propagate;
             bool                            terminal = false;
 
-            disassembler.Stream(*bytes, va, [&](const Instruction& ins) {
+            const auto coverage = disassembler.Stream(*bytes, va, [&](const Instruction& ins) {
                 if (page && !plainBranch && !terminal)
                 {
                     // adrp already matched; the remaining branches below only fire once.
@@ -86,6 +86,11 @@ namespace Sherlock::Facts
                     terminal = true;
                 }
             });
+
+            if (!coverage)
+            {
+                return std::unexpected(coverage.error());
+            }
 
             if (propagate)
             {

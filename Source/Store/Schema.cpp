@@ -96,13 +96,17 @@ namespace Sherlock::Store
         return WriteMeta(db, "CacheUuid", cacheUuid);
     }
 
-    Expected<void> CreateImageStore(Database& db, std::string_view imagePath)
+    Expected<void> CreateImageStore(Database& db, std::string_view imagePath, std::string_view cacheUuid)
     {
         if (auto ok = CreateWithMeta(db, kImageTables, "Image"); !ok)
         {
             return ok;
         }
-        return WriteMeta(db, "ImagePath", imagePath);
+        if (auto ok = WriteMeta(db, "ImagePath", imagePath); !ok)
+        {
+            return ok;
+        }
+        return WriteMeta(db, "CacheUuid", cacheUuid);
     }
 
     Expected<void> CreateImageIndexes(Database& db)
@@ -130,5 +134,20 @@ namespace Sherlock::Store
                         "rebuild it with Sherlock build facts");
         }
         return {};
+    }
+
+    Expected<std::string> ReadMeta(Database& db, std::string_view key)
+    {
+        auto statement = db.Prepare("SELECT Value FROM Meta WHERE Key = ?1");
+        if (!statement) return std::unexpected(statement.error());
+        if (auto ok = statement->Bind(1, key); !ok) return std::unexpected(ok.error());
+        const auto row = statement->Step();
+        if (!row) return std::unexpected(row.error());
+        if (!*row)
+        {
+            return Fail(DiagnosticCode::Mismatch, Severity::NotVerified, "ReadMeta", db.Path().string(),
+                        std::format("required metadata {} is missing", key), "rebuild it with Sherlock build facts");
+        }
+        return std::string(statement->Text(0));
     }
 }

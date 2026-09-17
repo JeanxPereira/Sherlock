@@ -274,13 +274,28 @@ namespace Sherlock::MachO
             while (more && pos < data->size())
             {
                 const auto byte = static_cast<std::uint8_t>((*data)[pos++]);
+                if (shift >= 64 || (shift == 63 && (byte & 0x7e) != 0))
+                {
+                    return Fail(DiagnosticCode::Malformed, Severity::NotVerified, "Image::FunctionStarts", Hex(_header),
+                                "LC_FUNCTION_STARTS contains an overflowing ULEB128", "re-extract the image metadata");
+                }
                 delta |= static_cast<std::uint64_t>(byte & 0x7f) << shift;
                 shift += 7;
                 more = (byte & 0x80) != 0;
             }
+            if (more)
+            {
+                return Fail(DiagnosticCode::Malformed, Severity::NotVerified, "Image::FunctionStarts", Hex(_header),
+                            "LC_FUNCTION_STARTS ends inside a ULEB128", "re-extract the image metadata");
+            }
             if (delta == 0)
             {
                 break;
+            }
+            if (delta > UINT64_MAX - address)
+            {
+                return Fail(DiagnosticCode::Malformed, Severity::NotVerified, "Image::FunctionStarts", Hex(_header),
+                            "LC_FUNCTION_STARTS address overflows", "re-extract the image metadata");
             }
             address += delta;
             starts.push_back(address);

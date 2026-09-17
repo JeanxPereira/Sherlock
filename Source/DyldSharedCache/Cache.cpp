@@ -145,6 +145,11 @@ namespace Sherlock::DyldSharedCache
                         "add support for this cache generation before reading it");
         }
 
+        if (main->Bytes().size() < Format::kUuid + 16 || main->Bytes().size() < Format::kSymbolFileUuid + 16)
+        {
+            return Fail(DiagnosticCode::Malformed, Severity::NotVerified, "Cache::Open", mainPath->string(),
+                        "the header is truncated before its UUID fields", "re-extract the cache");
+        }
         Cache cache;
         cache._uuid = UuidText(main->Bytes().subspan(Format::kUuid, 16));
         const auto subOffset   = header.At<std::uint32_t>(Format::kSubCacheArrayOffset);
@@ -187,6 +192,11 @@ namespace Sherlock::DyldSharedCache
             {
                 return std::unexpected(sub.error());
             }
+            if (sub->Bytes().size() < Format::kUuid + 16)
+            {
+                return Fail(DiagnosticCode::Malformed, Severity::NotVerified, "Cache::Open", sub->Path().string(),
+                            "the subcache header is truncated before its UUID", "re-extract the cache");
+            }
             const std::string expected = UuidText(std::as_bytes(std::span(entry->Uuid)));
             const std::string actual   = UuidText(sub->Bytes().subspan(Format::kUuid, 16));
             if (expected != actual)
@@ -205,6 +215,11 @@ namespace Sherlock::DyldSharedCache
             if (!symbols)
             {
                 return std::unexpected(symbols.error());
+            }
+            if (symbols->Bytes().size() < Format::kUuid + 16)
+            {
+                return Fail(DiagnosticCode::Malformed, Severity::NotVerified, "Cache::Open", symbols->Path().string(),
+                            "the symbols header is truncated before its UUID", "re-extract the cache");
             }
             if (UuidText(symbols->Bytes().subspan(Format::kUuid, 16)) != symbolUuid)
             {
@@ -318,6 +333,11 @@ namespace Sherlock::DyldSharedCache
             return Fail(DiagnosticCode::Unsupported, Severity::NotVerified, operation, Hex(slot),
                         std::format("unhandled slide info version {}", mapping->SlideInfo->Version),
                         "add this slide info version to DyldSharedCache");
+        }
+        if (mapping->SlideInfo->PageSize == 0)
+        {
+            return Fail(DiagnosticCode::Malformed, Severity::NotVerified, operation, Hex(slot),
+                        "slide info has a zero page size", "re-extract the cache");
         }
         return mapping;
     }

@@ -16,6 +16,19 @@ using Foundation::Severity;
 
 namespace
 {
+    void GateSignedLiteralOffset()
+    {
+        Facts::LiteralTracker tracker;
+        std::vector<Facts::LiteralRead> reads;
+        tracker.Feed({0x100, "adrp", "x8, #0x1000"}, reads);
+        tracker.Feed({0x104, "ldur", "d0, [x8, #-8]"}, reads);
+        ExpectEq(reads.size(), std::size_t{1}, "a negative ldur displacement produces one literal read");
+        if (!reads.empty())
+        {
+            ExpectEq(reads.front().Target, std::uint64_t{0xff8}, "the signed displacement is applied without wrap");
+        }
+    }
+
     void GateIslandControls(const DyldSharedCache::Cache& cache, Facts::Disassembler& disassembler)
     {
         const auto a = Facts::ResolveIsland(cache, disassembler, 0x24808c3e0);
@@ -118,7 +131,7 @@ namespace
         }
         auto db = Store::Database::Open(path, Store::Database::Mode::ReadWrite);
         Expect(db.has_value(), "the round-trip database opens");
-        Expect(Store::CreateImageStore(*db, image->Path).has_value(), "the image schema is created");
+        Expect(Store::CreateImageStore(*db, image->Path, "test-cache").has_value(), "the image schema is created");
         Expect(Facts::WriteImageFacts(*db, *image, [](std::string_view) { return std::nullopt; }).has_value(),
                "WriteImageFacts runs");
         ExpectEq(db->ScalarInt("SELECT count(*) FROM Function").value(),
@@ -146,6 +159,7 @@ int main()
     }
     try
     {
+        GateSignedLiteralOffset();
         GateIslandControls(*cache, *disassembler);
         GateResolveLayersFunction(*cache, *disassembler);
         GateSystemBannerLiterals(*cache, *disassembler);
