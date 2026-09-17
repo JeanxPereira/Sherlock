@@ -124,20 +124,24 @@ namespace Sherlock::Cli
             return dummy != nullptr && *dummy == '\0' ? std::optional<std::uint64_t>(value) : std::nullopt;
         }
 
-        void PrintCallLine(const std::string& imageBasename, std::int64_t site, std::int64_t caller,
+        void Emit(const QueryEnvironment& env, std::string line)
+        {
+            if (env.Output != nullptr) env.Output->push_back(line);
+            if (!env.Json) std::printf("%s\n", line.c_str());
+        }
+
+        void PrintCallLine(const QueryEnvironment& env, const std::string& imageBasename, std::int64_t site,
+                           std::int64_t caller,
                            std::string_view via, bool islandIsNull, std::int64_t island)
         {
             if (via == "Island" && !islandIsNull)
             {
-                std::printf("  0x%llx  in 0x%llx  %s  via Island 0x%llx\n", static_cast<unsigned long long>(site),
-                           static_cast<unsigned long long>(caller), imageBasename.c_str(),
-                           static_cast<unsigned long long>(island));
+                Emit(env, std::format("  0x{:x}  in 0x{:x}  {}  via Island 0x{:x}", site, caller,
+                                      imageBasename, island));
             }
             else
             {
-                std::printf("  0x%llx  in 0x%llx  %s  via %.*s\n", static_cast<unsigned long long>(site),
-                           static_cast<unsigned long long>(caller), imageBasename.c_str(), static_cast<int>(via.size()),
-                           via.data());
+                Emit(env, std::format("  0x{:x}  in 0x{:x}  {}  via {}", site, caller, imageBasename, via));
             }
         }
     }
@@ -187,10 +191,8 @@ namespace Sherlock::Cli
                 total += row.CoverageTotal;
             }
         }
-        if (!env.Json) std::printf("Sherlock %s \xC2\xB7 build %.*s \xC2\xB7 layer 1 facts \xC2\xB7 %zu image(s) \xC2\xB7 coverage "
-                   "%llu/%llu instructions\n",
-                   SHERLOCK_VERSION, static_cast<int>(headerBuild.size()), headerBuild.data(), done,
-                   static_cast<unsigned long long>(read), static_cast<unsigned long long>(total));
+        Emit(env, std::format("Sherlock {} \xC2\xB7 build {} \xC2\xB7 layer 1 facts \xC2\xB7 {} image(s) \xC2\xB7 coverage {}/{} instructions",
+                              SHERLOCK_VERSION, headerBuild, done, read, total));
         return {};
     }
 
@@ -245,9 +247,9 @@ namespace Sherlock::Cli
                     break;
                 }
                 ++count;
-                if (!env.Json && (env.Full || count <= 10))
+                if (env.Full || count <= 10)
                 {
-                    PrintCallLine(Basename(image.Path), statement->Int(0), statement->Int(1), statement->Text(2),
+                    PrintCallLine(env, Basename(image.Path), statement->Int(0), statement->Int(1), statement->Text(2),
                                  statement->IsNull(3), statement->Int(3));
                 }
             }
@@ -349,10 +351,10 @@ namespace Sherlock::Cli
         const auto owned = Resolve(cache, *rows, *address);
         if (!owned)
         {
-            if (!env.Json) std::printf("owner: (global cache data)\n");
+            Emit(env, "owner: (global cache data)");
             return {VerdictKind::Empty, 0, {}, 0, 0};
         }
-        if (!env.Json) std::printf("owner: %s %s\n", owned->Image.Path.c_str(), owned->Segment.c_str());
+        Emit(env, std::format("owner: {} {}", owned->Image.Path, owned->Segment));
         if (owned->Image.State != "FactsDone")
         {
             return {VerdictKind::Partial, 0, std::format("image {} not built", owned->Image.Path), 0, 0};
@@ -389,8 +391,8 @@ namespace Sherlock::Cli
         {
             return {VerdictKind::Empty, 0, {}, owned->Image.CoverageRead, owned->Image.CoverageTotal};
         }
-        if (!env.Json) std::printf("function: 0x%llx (+0x%llx)\n", static_cast<unsigned long long>(*functionAddress),
-                   static_cast<unsigned long long>(*address) - static_cast<unsigned long long>(*functionAddress));
+        Emit(env, std::format("function: 0x{:x} (+0x{:x})", *functionAddress,
+                              static_cast<std::uint64_t>(*address) - static_cast<std::uint64_t>(*functionAddress)));
 
         auto sym = db->Prepare("SELECT N.Text, D.Text FROM Symbol S JOIN Name N ON N.Id = S.Name "
                                "LEFT JOIN Name D ON D.Id = S.Demangled WHERE S.Address = ?1 LIMIT 1");
@@ -412,10 +414,10 @@ namespace Sherlock::Cli
         }
         if (*symbolRow)
         {
-            if (!env.Json) std::printf("symbol: %.*s\n", static_cast<int>(sym->Text(0).size()), sym->Text(0).data());
+            Emit(env, std::format("symbol: {}", sym->Text(0)));
             if (!sym->IsNull(1))
             {
-                if (!env.Json) std::printf("demangled: %.*s\n", static_cast<int>(sym->Text(1).size()), sym->Text(1).data());
+                Emit(env, std::format("demangled: {}", sym->Text(1)));
             }
         }
 
@@ -441,22 +443,20 @@ namespace Sherlock::Cli
             }
             if (!*row) break;
             ++calleeCount;
-            if (!env.Json && (env.Full || calleeCount <= 10))
+            if (env.Full || calleeCount <= 10)
             {
-                std::printf("  callee  0x%llx  -> 0x%llx  via %.*s\n",
-                           static_cast<unsigned long long>(callees->Int(0)),
-                           static_cast<unsigned long long>(callees->Int(1)), static_cast<int>(callees->Text(2).size()),
-                           callees->Text(2).data());
+                Emit(env, std::format("  callee  0x{:x}  -> 0x{:x}  via {}", callees->Int(0), callees->Int(1),
+                                      callees->Text(2)));
             }
         }
-        if (!env.Json) std::printf("callees: %zu\n", calleeCount);
+        Emit(env, std::format("callees: {}", calleeCount));
 
         const auto callerVerdict = RunCallers(env, static_cast<std::uint64_t>(*functionAddress));
         if (callerVerdict.Kind == VerdictKind::NotVerified)
         {
             return callerVerdict;
         }
-        if (!env.Json) std::printf("callers: %zu\n", callerVerdict.Count);
+        Emit(env, std::format("callers: {}", callerVerdict.Count));
 
         // q's caller summary scans every FactsDone store, including the owning image.
         // Its coverage therefore represents the full query scope and counts each image once.
@@ -484,7 +484,7 @@ namespace Sherlock::Cli
             {
                 return {VerdictKind::NotVerified, 0, std::format("0x{:x} is not mapped", address), 0, 0};
             }
-            if (!env.Json) std::printf("owner: (global cache data)\n");
+            Emit(env, "owner: (global cache data)");
             return {VerdictKind::Empty, 0, {}, 0, 0};
         }
         if (owned->Image.State != "FactsDone")
@@ -540,11 +540,10 @@ namespace Sherlock::Cli
             }
             if (!*row) break;
             ++count;
-            if (!env.Json && (env.Full || count <= 10))
+            if (env.Full || count <= 10)
             {
-                std::printf("  0x%llx  -> 0x%llx  via %.*s\n", static_cast<unsigned long long>(statement->Int(0)),
-                           static_cast<unsigned long long>(statement->Int(1)), static_cast<int>(statement->Text(2).size()),
-                           statement->Text(2).data());
+                Emit(env, std::format("  0x{:x}  -> 0x{:x}  via {}", statement->Int(0), statement->Int(1),
+                                      statement->Text(2)));
             }
         }
         return {count > 0 ? VerdictKind::Found : VerdictKind::Empty, count, {}, owned->Image.CoverageRead,
@@ -573,7 +572,7 @@ namespace Sherlock::Cli
             {
                 return {VerdictKind::NotVerified, 0, std::format("0x{:x} is not mapped", address), 0, 0};
             }
-            if (!env.Json) std::printf("owner: (global cache data)\n");
+            Emit(env, "owner: (global cache data)");
             return {VerdictKind::Empty, 0, {}, 0, 0};
         }
         if (owned->Image.State != "FactsDone")
@@ -610,17 +609,15 @@ namespace Sherlock::Cli
             }
             if (!*row) break;
             ++count;
-            if (!env.Json && (env.Full || count <= 10) && statement->IsNull(3))
+            if ((env.Full || count <= 10) && statement->IsNull(3))
             {
-                std::printf("  0x%llx  -> 0x%llx  %.*s\n", static_cast<unsigned long long>(statement->Int(0)),
-                           static_cast<unsigned long long>(statement->Int(1)), static_cast<int>(statement->Text(2).size()),
-                           statement->Text(2).data());
+                Emit(env, std::format("  0x{:x}  -> 0x{:x}  {}", statement->Int(0), statement->Int(1),
+                                      statement->Text(2)));
             }
-            else if (!env.Json && (env.Full || count <= 10))
+            else if (env.Full || count <= 10)
             {
-                std::printf("  0x%llx  -> 0x%llx  %.*s  (f64 %g)\n", static_cast<unsigned long long>(statement->Int(0)),
-                           static_cast<unsigned long long>(statement->Int(1)), static_cast<int>(statement->Text(2).size()),
-                           statement->Text(2).data(), statement->Real(3));
+                Emit(env, std::format("  0x{:x}  -> 0x{:x}  {}  (f64 {})", statement->Int(0), statement->Int(1),
+                                      statement->Text(2), statement->Real(3)));
             }
         }
         return {count > 0 ? VerdictKind::Found : VerdictKind::Empty, count, {}, owned->Image.CoverageRead,
@@ -650,9 +647,9 @@ namespace Sherlock::Cli
         const auto producing = Store::ReadMeta(*catalog, "SherlockVersion");
         if (!schema) return {VerdictKind::NotVerified, 0, schema.error().Format(), 0, 0};
         if (!producing) return {VerdictKind::NotVerified, 0, producing.error().Format(), 0, 0};
-        if (!env.Json) std::printf("schema: %s\n", schema->c_str());
-        if (!env.Json) std::printf("produced by Sherlock: %s\n", producing->c_str());
-        if (!env.Json) std::printf("running Sherlock: %s\n", SHERLOCK_VERSION);
+        Emit(env, std::format("schema: {}", *schema));
+        Emit(env, std::format("produced by Sherlock: {}", *producing));
+        Emit(env, std::format("running Sherlock: {}", SHERLOCK_VERSION));
         for (const char* key : {"Build", "CacheUuid"})
         {
             if (auto bind = meta->Bind(1, std::string_view(key)); !bind)
@@ -666,7 +663,7 @@ namespace Sherlock::Cli
             }
             if (*row)
             {
-                if (!env.Json) std::printf("%s: %.*s\n", key, static_cast<int>(meta->Text(0).size()), meta->Text(0).data());
+                Emit(env, std::format("{}: {}", key, meta->Text(0)));
             }
             if (auto reset = meta->Reset(); !reset)
             {
@@ -677,11 +674,10 @@ namespace Sherlock::Cli
         std::size_t   done = 0;
         for (const auto& image : *rows)
         {
-            if (!env.Json) std::printf("  %-12s %-40s facts %s coverage %llu/%llu%s%s\n", image.State.c_str(), image.Path.c_str(),
-                       image.FactsVersion.empty() ? "(none)" : image.FactsVersion.c_str(),
-                       static_cast<unsigned long long>(image.CoverageRead),
-                       static_cast<unsigned long long>(image.CoverageTotal), image.Reason.empty() ? "" : " reason: ",
-                       image.Reason.c_str());
+            Emit(env, std::format("  {:<12} {:<40} facts {} coverage {}/{}{}{}", image.State, image.Path,
+                                  image.FactsVersion.empty() ? "(none)" : image.FactsVersion,
+                                  image.CoverageRead, image.CoverageTotal,
+                                  image.Reason.empty() ? "" : " reason: ", image.Reason));
             if (image.State == "FactsDone")
             {
                 ++done;
@@ -698,11 +694,9 @@ namespace Sherlock::Cli
         }
         if (diskError)
             return {VerdictKind::NotVerified, 0, diskError.message(), read, total};
-        if (!env.Json)
-        {
-            std::printf("disk: %llu bytes\n", static_cast<unsigned long long>(diskBytes));
-            std::printf("layer 2: not built\nlayer 3: not built\n");
-        }
+        Emit(env, std::format("disk: {} bytes", diskBytes));
+        Emit(env, "layer 2: not built");
+        Emit(env, "layer 3: not built");
         return {VerdictKind::Found, done, {}, read, total};
     }
 }

@@ -2,6 +2,7 @@
 // Island resolution, out-of-text calls, literal reads and coverage against the measured controls.
 #include <DyldSharedCache/Cache.h>
 #include <Facts/BranchIsland.h>
+#include <Facts/Builder.h>
 #include <Facts/Disassembler.h>
 #include <Facts/ImageFacts.h>
 #include <Facts/LiteralReaders.h>
@@ -16,6 +17,27 @@ using Foundation::Severity;
 
 namespace
 {
+    void GateFactsCompletionRequiresCoverage()
+    {
+        const auto path = std::filesystem::temp_directory_path() / "SherlockFactsCompletionGate.db";
+        for (const char* suffix : {"", "-wal", "-shm"})
+        {
+            std::filesystem::remove(path.string() + suffix);
+        }
+        auto db = Store::Database::Open(path, Store::Database::Mode::ReadWrite);
+        Expect(db.has_value(), "the completion gate catalog opens");
+        if (!db) return;
+        Expect(Store::CreateCatalog(*db, "test", "cache").has_value(), "the completion gate catalog is created");
+        Expect(db->Execute("INSERT INTO Image VALUES('/x', 'x.db', NULL, 1, 'FactsDone', NULL, '0.1.0', NULL)").has_value(),
+               "the completion gate image is inserted");
+        const auto missing = Facts::HasCompletedFacts(*db, "/x");
+        Expect(missing.has_value() && !*missing, "FactsDone without coverage is not resumable");
+        Expect(db->Execute("INSERT INTO Coverage VALUES('/x', 'Facts', 'instructions', 1, 2)").has_value(),
+               "the completion gate coverage is inserted");
+        const auto complete = Facts::HasCompletedFacts(*db, "/x");
+        Expect(complete.has_value() && *complete, "FactsDone with valid coverage is resumable");
+    }
+
     void GateSignedLiteralOffset()
     {
         Facts::LiteralTracker tracker;
@@ -26,6 +48,14 @@ namespace
         if (!reads.empty())
         {
             ExpectEq(reads.front().Target, std::uint64_t{0xff8}, "the signed displacement is applied without wrap");
+        }
+        reads.clear();
+        tracker.Feed({0x108, "adrp", "x8, #0x1000"}, reads);
+        tracker.Feed({0x10c, "ldur", "d0, [x8, #-0x10]"}, reads);
+        ExpectEq(reads.size(), std::size_t{1}, "a negative hexadecimal displacement produces one literal read");
+        if (!reads.empty())
+        {
+            ExpectEq(reads.front().Target, std::uint64_t{0xff0}, "the signed hexadecimal displacement is applied");
         }
     }
 
@@ -141,6 +171,52 @@ namespace
         ExpectEq(db->ScalarInt("SELECT count(*) FROM LiteralRef").value(),
                  static_cast<std::int64_t>(image->Literals.size()), "LiteralRef row count matches");
     }
+
+    void GateCanonicalBuildAndResume(const DyldSharedCache::Cache& cache)
+    {
+        const auto found = cache.FindImage("SystemBannerUI");
+        Expect(found.has_value(), "SystemBannerUI resolves for the canonical build gate");
+        if (!found) return;
+        const auto root = std::filesystem::temp_directory_path() / "SherlockCanonicalBuildGate";
+        std::error_code error;
+        std::filesystem::remove_all(root, error);
+
+        Facts::BuildOptions options;
+        options.Store = root;
+        options.Workers = 1;
+        options.MinimumFreeBytes = 0;
+        options.Json = true;
+        options.Demangle = [](std::string_view) { return std::optional<std::string>{}; };
+        options.Images = {{"SystemBannerUI", ""}, {(*found)->Path, ""}};
+        const auto first = Facts::BuildFacts(cache, "test", options);
+        Expect(first.has_value() && first->Done == 1, "basename and canonical requests build one canonical image");
+        if (!first || first->Completed.empty()) return;
+        ExpectEq(first->Completed.front().Path, (*found)->Path, "the build report uses the canonical image path");
+        Expect(first->Completed.front().PeakMiB > 0, "the image result records peak memory");
+
+        {
+            auto catalog = Store::Database::Open(root / "Catalog.db", Store::Database::Mode::ReadWrite);
+            Expect(catalog.has_value(), "the canonical build catalog reopens");
+            if (!catalog) return;
+            auto row = catalog->Prepare("SELECT Path FROM Image");
+            Expect(row.has_value() && row->Step().value(), "the canonical catalog row is readable");
+            if (row) ExpectEq(std::string(row->Text(0)), (*found)->Path, "the catalog stores the canonical path");
+            Expect(catalog->Execute("DELETE FROM Coverage WHERE Layer = 'Facts'").has_value(),
+                   "the resume fixture removes completion coverage");
+        }
+
+        options.Resume = true;
+        options.Images = {{"SystemBannerUI", ""}};
+        const auto resumed = Facts::BuildFacts(cache, "test", options);
+        Expect(resumed.has_value() && resumed->Done == 1, "resume rebuilds FactsDone when coverage is missing");
+        if (resumed)
+        {
+            auto catalog = Store::Database::Open(root / "Catalog.db", Store::Database::Mode::ReadOnly);
+            Expect(catalog.has_value() && catalog->ScalarInt("SELECT count(*) FROM Coverage WHERE Layer = 'Facts'").value() == 1,
+                   "the resumed image restores one completion coverage row");
+        }
+        std::filesystem::remove_all(root, error);
+    }
 }
 
 int main()
@@ -159,11 +235,13 @@ int main()
     }
     try
     {
+        GateFactsCompletionRequiresCoverage();
         GateSignedLiteralOffset();
         GateIslandControls(*cache, *disassembler);
         GateResolveLayersFunction(*cache, *disassembler);
         GateSystemBannerLiterals(*cache, *disassembler);
         GateWriteRoundTrip(*cache, *disassembler);
+        GateCanonicalBuildAndResume(*cache);
     }
     catch (const std::exception& e)
     {

@@ -9,20 +9,23 @@ import tempfile
 
 def create_catalog(path: pathlib.Path, scenario: str) -> str:
     expected_by_scenario = {
-        "meta-prepare": ("Mismatch in CheckSchema", "no Sherlock schema"),
-        "meta-step": ("Mismatch in CheckSchema", "expected Catalog schema 1"),
-        "images": ("Mismatch in CheckSchema", "expected Catalog schema 1"),
+        "meta-prepare": ("Database::Prepare", "no such table: Meta"),
+        "meta-step": ("Statement::Step", "integer overflow"),
+        "images": ("Database::Prepare", "no such table: Image"),
     }
     expected = expected_by_scenario[scenario]
     catalog = sqlite3.connect(path)
     try:
         if scenario == "meta-step":
             catalog.execute(
-                "CREATE VIEW Meta AS SELECT 'Build' AS Key, abs(-9223372036854775808) AS Value"
+                "CREATE VIEW Meta AS SELECT 'Kind' AS Key, abs(-9223372036854775808) AS Value "
+                "UNION ALL SELECT 'SchemaVersion', '1' UNION ALL SELECT 'CacheUuid', 'cache'"
             )
         elif scenario == "images":
             catalog.execute("CREATE TABLE Meta (Key TEXT PRIMARY KEY, Value TEXT NOT NULL)")
-            catalog.execute("INSERT INTO Meta VALUES ('Build', '26A5416b')")
+            catalog.executemany("INSERT INTO Meta VALUES (?, ?)", [
+                ("Kind", "Catalog"), ("SchemaVersion", "1"), ("CacheUuid", "cache"),
+                ("Build", "26A5416b"), ("SherlockVersion", "0.1.0")])
         catalog.commit()
     finally:
         catalog.close()

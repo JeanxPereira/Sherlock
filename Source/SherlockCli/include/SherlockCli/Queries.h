@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <string_view>
+#include <string>
+#include <vector>
 
 namespace Sherlock::Cli
 {
@@ -17,6 +19,7 @@ namespace Sherlock::Cli
         std::filesystem::path Store;
         bool                  Full = false;
         bool                  Json = false;
+        std::vector<std::string>* Output = nullptr;
     };
 
     Foundation::Expected<void> PrintHeader(const QueryEnvironment& env, std::string_view build);

@@ -35,6 +35,11 @@ namespace Sherlock::Cli
         return std::format("verdict: FOUND {}  coverage {}/{}", verdict.Count, verdict.Read, verdict.Total);
     }
 
+    VerdictKind EffectiveKind(const Verdict& verdict)
+    {
+        return Incomplete(verdict) ? VerdictKind::Partial : verdict.Kind;
+    }
+
     int ExitCode(const Verdict& verdict)
     {
         if (verdict.Kind == VerdictKind::NotVerified)

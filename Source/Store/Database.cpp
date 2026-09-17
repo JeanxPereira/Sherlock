@@ -20,6 +20,28 @@ namespace Sherlock::Store
             "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; "
             "PRAGMA mmap_size=268435456; PRAGMA foreign_keys=OFF;";
         constexpr std::string_view kReadOnlyPragmas = "PRAGMA temp_store=MEMORY; PRAGMA mmap_size=268435456;";
+
+        bool IsResourceFailure(int rc)
+        {
+            switch (rc & 0xff)
+            {
+            case SQLITE_FULL:
+            case SQLITE_IOERR:
+            case SQLITE_CANTOPEN:
+            case SQLITE_NOMEM: return true;
+            default: return false;
+            }
+        }
+
+        DiagnosticCode CodeFor(int rc)
+        {
+            return IsResourceFailure(rc) ? DiagnosticCode::Io : DiagnosticCode::Database;
+        }
+
+        Severity SeverityFor(int rc)
+        {
+            return IsResourceFailure(rc) ? Severity::NotVerified : Severity::Failed;
+        }
     }
 
     Expected<void> Statement::Check(int rc, const char* operation) const
@@ -28,7 +50,7 @@ namespace Sherlock::Store
         {
             return {};
         }
-        return Fail(DiagnosticCode::Database, Severity::Failed, operation, ::sqlite3_sql(_statement),
+        return Fail(CodeFor(rc), SeverityFor(rc), operation, ::sqlite3_sql(_statement),
                     "SQLite refused the statement", "read the SQLite message", ::sqlite3_errmsg(_db));
     }
 
@@ -160,7 +182,8 @@ namespace Sherlock::Store
 
     std::unexpected<Foundation::Diagnostic> Database::Error(const char* operation, std::string_view subject) const
     {
-        return Fail(DiagnosticCode::Database, Severity::Failed, operation, std::string(subject),
+        const int rc = ::sqlite3_extended_errcode(_db);
+        return Fail(CodeFor(rc), SeverityFor(rc), operation, std::string(subject),
                     "SQLite refused the statement", "read the SQLite message", ::sqlite3_errmsg(_db));
     }
 

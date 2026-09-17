@@ -85,6 +85,20 @@ namespace
         ::GetProcessHandleCount(::GetCurrentProcess(), &after);
         ExpectEq(after, before, "200 open/query/close cycles leak no handle");
     }
+
+    void GateSqliteFullSeverity()
+    {
+        const auto path = Fresh("SherlockFullGate.db");
+        auto db = Store::Database::Open(path, Store::Database::Mode::ReadWrite);
+        Expect(db.has_value(), "disk-full gate database opens");
+        if (!db) return;
+        Expect(db->Execute("PRAGMA page_size=512; PRAGMA max_page_count=2; CREATE TABLE T(Value BLOB);").has_value(),
+               "disk-full fixture is configured");
+        const auto result = db->Execute("INSERT INTO T VALUES(zeroblob(4096))");
+        Expect(!result.has_value() && result.error().Code == Foundation::DiagnosticCode::Io &&
+                   result.error().Level == Foundation::Severity::NotVerified,
+               "SQLITE_FULL is a NOT VERIFIED resource failure");
+    }
 }
 
 int main()
@@ -94,6 +108,7 @@ int main()
         GateRollbackAndReuse();
         GateSchemaRefusal();
         GateHandleLifetime();
+        GateSqliteFullSeverity();
     }
     catch (const std::exception& e)
     {

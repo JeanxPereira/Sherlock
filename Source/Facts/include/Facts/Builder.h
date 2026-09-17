@@ -13,6 +13,11 @@
 #include <utility>
 #include <vector>
 
+namespace Sherlock::Store
+{
+    class Database;
+}
+
 namespace Sherlock::Facts
 {
     using Foundation::Expected;
@@ -37,6 +42,7 @@ namespace Sherlock::Facts
             double Seconds = 0;
             std::uint64_t Decoded = 0;
             std::uint64_t Total = 0;
+            double PeakMiB = 0;
         };
         std::size_t                                       Done = 0;
         std::vector<CompletedImage>                       Completed;
@@ -51,4 +57,5 @@ namespace Sherlock::Facts
 
     Expected<BuildReport> BuildFacts(const DyldSharedCache::Cache& cache, std::string_view build,
                                      const BuildOptions& options);
+    Expected<bool> HasCompletedFacts(Store::Database& catalog, std::string_view imagePath);
 }

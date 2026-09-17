@@ -25,5 +25,6 @@ namespace Sherlock::Cli
     };
 
     std::string FormatVerdict(const Verdict& verdict);
+    VerdictKind EffectiveKind(const Verdict& verdict);
     int         ExitCode(const Verdict& verdict);
 }

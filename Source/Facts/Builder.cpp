@@ -8,6 +8,7 @@
 #include <Store/Schema.h>
 
 #include <windows.h>
+#include <psapi.h>
 
 #include <algorithm>
 #include <atomic>
@@ -17,6 +18,7 @@
 #include <queue>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Sherlock::Facts
 {
@@ -46,6 +48,8 @@ namespace Sherlock::Facts
             std::uint64_t Total = 0;
             std::uintmax_t Bytes = 0;
             double Seconds = 0;
+            double PeakMiB = 0;
+            Diagnostic Emergency;
         };
 
         std::string BasenameOf(const std::string& path)
@@ -76,6 +80,21 @@ namespace Sherlock::Facts
             }
             return {};
         }
+    }
+
+    Expected<bool> HasCompletedFacts(Store::Database& catalog, std::string_view imagePath)
+    {
+        auto statement = catalog.Prepare(
+            "SELECT I.State, C.Unit, C.Read, C.Total FROM Image I "
+            "LEFT JOIN Coverage C ON C.Image = I.Path AND C.Layer = 'Facts' WHERE I.Path = ?1");
+        if (!statement) return std::unexpected(statement.error());
+        if (auto ok = statement->Bind(1, imagePath); !ok) return std::unexpected(ok.error());
+        const auto row = statement->Step();
+        if (!row) return std::unexpected(row.error());
+        if (!*row || statement->Text(0) != "FactsDone" || statement->Text(1) != "instructions") return false;
+        const auto read = statement->Int(2);
+        const auto total = statement->Int(3);
+        return read >= 0 && total > 0 && read <= total;
     }
 
     Expected<BuildReport> BuildFacts(const DyldSharedCache::Cache& cache, std::string_view build,
@@ -126,19 +145,21 @@ namespace Sherlock::Facts
         }
 
         std::unordered_map<std::string, int> seen;
+        std::unordered_set<std::string> selected;
         std::vector<WorkItem> items;
-        for (const auto& [path, tower] : options.Images)
+        for (const auto& [requestedPath, tower] : options.Images)
         {
-            const auto found = cache.FindImage(path);
+            const auto found = cache.FindImage(requestedPath);
             if (!found)
             {
-                report.Failed.push_back({path, Severity::Failed, found.error().Format()});
+                report.Failed.push_back({requestedPath, Severity::Failed, found.error().Format()});
                 continue;
             }
+            const std::string path = (*found)->Path;
+            if (!selected.insert(path).second) continue;
 
             std::string file;
-            auto existing = catalog->Prepare("SELECT Name, State FROM Image WHERE Path = ?1");
-            bool factsDone = false;
+            auto existing = catalog->Prepare("SELECT Name FROM Image WHERE Path = ?1");
             if (!existing) return std::unexpected(existing.error());
             if (auto ok = existing->Bind(1, path); !ok) return std::unexpected(ok.error());
             const auto row = existing->Step();
@@ -146,8 +167,9 @@ namespace Sherlock::Facts
             if (*row)
             {
                 file = existing->Text(0);
-                factsDone = existing->Text(1) == "FactsDone";
             }
+            const auto factsDone = HasCompletedFacts(*catalog, path);
+            if (!factsDone) return std::unexpected(factsDone.error());
             if (file.empty())
             {
                 const std::string base = BasenameOf(path);
@@ -157,21 +179,31 @@ namespace Sherlock::Facts
             const auto storePath = options.Store / "Images" / file;
             const auto valid = ValidImageStore(storePath, path, cache.Uuid());
             if (!valid) return std::unexpected(valid.error());
-            if (options.Resume && factsDone && *valid) continue;
-            items.push_back({path, tower, (*found)->Header, storePath, file, factsDone && *valid});
+            if (options.Resume && *factsDone && *valid) continue;
+            items.push_back({path, tower, (*found)->Header, storePath, file, *factsDone && *valid});
         }
 
-        std::queue<WorkItem> pending;
-        for (auto& item : items) pending.push(item);
+        std::queue<std::size_t> pending;
         std::mutex queueMutex;
         std::mutex catalogMutex;
-        std::mutex resultMutex;
         std::vector<WorkResult> results;
+        results.reserve(items.size());
+        for (auto& item : items)
+        {
+            const auto path = item.Path;
+            results.push_back({std::move(item), false, std::nullopt, 0, 0, 0, 0, 0,
+                Diagnostic{DiagnosticCode::Io, Severity::NotVerified, "BuildFacts::Worker", path,
+                    "an exception escaped image processing", "inspect the image and retry", {}}});
+            pending.push(results.size() - 1);
+        }
         std::atomic<bool> resourceStop = false;
+        std::atomic<bool> workerEntryFailed = false;
 
         const auto record = [&](const WorkResult& result) -> Expected<void> {
             if (!result.Ok && result.Item.HadUsableStore) return {};
             std::lock_guard<std::mutex> lock(catalogMutex);
+            auto transaction = Store::Transaction::Begin(*catalog);
+            if (!transaction) return std::unexpected(transaction.error());
             auto image = catalog->Prepare("INSERT OR REPLACE INTO Image(Path, Name, Tower, Header, State, Reason, FactsVersion) "
                                           "VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)");
             if (!image) return std::unexpected(image.error());
@@ -196,7 +228,14 @@ namespace Sherlock::Facts
                 if (auto ok = coverage->Bind(3, static_cast<std::int64_t>(result.Total)); !ok) return ok;
                 if (auto step = coverage->Step(); !step) return std::unexpected(step.error());
             }
-            return {};
+            else
+            {
+                auto coverage = catalog->Prepare("DELETE FROM Coverage WHERE Image = ?1 AND Layer = 'Facts'");
+                if (!coverage) return std::unexpected(coverage.error());
+                if (auto ok = coverage->Bind(1, result.Item.Path); !ok) return ok;
+                if (auto step = coverage->Step(); !step) return std::unexpected(step.error());
+            }
+            return transaction->Commit();
         };
 
         const unsigned requestedWorkers = options.Workers != 0 ? options.Workers : std::max(1u, std::thread::hardware_concurrency());
@@ -208,17 +247,19 @@ namespace Sherlock::Facts
             for (unsigned w = 0; w < workerCount; ++w)
             {
                 workers.emplace_back([&]() {
-                    for (;;)
+                    try
                     {
-                        WorkItem item;
+                        for (;;)
+                        {
+                        std::size_t index = 0;
                         {
                             std::lock_guard<std::mutex> lock(queueMutex);
                             if (pending.empty() || resourceStop) return;
-                            item = std::move(pending.front());
+                            index = pending.front();
                             pending.pop();
                         }
-                        WorkResult result;
-                        result.Item = item;
+                        auto& result = results[index];
+                        const auto& item = result.Item;
                         const auto started = std::chrono::steady_clock::now();
                         try
                         {
@@ -267,31 +308,48 @@ namespace Sherlock::Facts
                                     }
                                 }
                             }
+                            result.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+                            PROCESS_MEMORY_COUNTERS counters{};
+                            if (::GetProcessMemoryInfo(::GetCurrentProcess(), &counters, sizeof(counters)))
+                                result.PeakMiB = static_cast<double>(counters.PeakWorkingSetSize) / (1024.0 * 1024.0);
+                            if (result.Error && result.Error->Level == Severity::NotVerified &&
+                                result.Error->Code == DiagnosticCode::Io)
+                                resourceStop = true;
+                            if (const auto stored = record(result); !stored)
+                            {
+                                result.Ok = false;
+                                result.Error = stored.error();
+                                if (result.Error->Level == Severity::NotVerified && result.Error->Code == DiagnosticCode::Io)
+                                    resourceStop = true;
+                            }
+                            if (result.Ok && !options.Json)
+                            {
+                                std::printf("%s  FactsDone  coverage %llu/%llu  %llu bytes  %.1fs  peak %.1f MiB\n",
+                                    item.Path.c_str(), static_cast<unsigned long long>(result.Decoded),
+                                    static_cast<unsigned long long>(result.Total), static_cast<unsigned long long>(result.Bytes),
+                                    result.Seconds, result.PeakMiB);
+                            }
                         }
-                        catch (const std::exception& error)
+                        catch (const std::exception&)
                         {
-                            result.Error = Diagnostic{DiagnosticCode::Io, Severity::NotVerified, "BuildFacts::Worker",
-                                item.Path, "an exception escaped image extraction", "inspect the image and retry", error.what()};
+                            result.Ok = false;
+                            result.Error.emplace(std::move(result.Emergency));
+                            result.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+                            resourceStop = true;
                         }
                         catch (...)
                         {
-                            result.Error = Diagnostic{DiagnosticCode::Io, Severity::NotVerified, "BuildFacts::Worker",
-                                item.Path, "an unknown exception escaped image extraction", "inspect the image and retry", {}};
-                        }
-                        result.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-                        if (const auto stored = record(result); !stored && !result.Error)
-                        {
                             result.Ok = false;
-                            result.Error = stored.error();
+                            result.Error.emplace(std::move(result.Emergency));
+                            result.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+                            resourceStop = true;
                         }
-                        if (result.Ok && !options.Json)
-                        {
-                            std::printf("%s  FactsDone  coverage %llu/%llu  %llu bytes  %.1fs\n", item.Path.c_str(),
-                                static_cast<unsigned long long>(result.Decoded), static_cast<unsigned long long>(result.Total),
-                                static_cast<unsigned long long>(result.Bytes), result.Seconds);
                         }
-                        std::lock_guard<std::mutex> lock(resultMutex);
-                        results.push_back(std::move(result));
+                    }
+                    catch (...)
+                    {
+                        resourceStop = true;
+                        workerEntryFailed = true;
                     }
                 });
             }
@@ -303,13 +361,19 @@ namespace Sherlock::Facts
                         "worker creation failed", "reduce --workers and retry", error.what());
         }
         workers.clear();
+        if (workerEntryFailed)
+        {
+            return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildFacts::Worker", "worker entry",
+                        "an exception escaped the worker loop", "reduce --workers and retry");
+        }
 
         for (const auto& result : results)
         {
             if (result.Ok)
             {
                 ++report.Done;
-                report.Completed.push_back({result.Item.Path, result.Bytes, result.Seconds, result.Decoded, result.Total});
+                report.Completed.push_back(
+                    {result.Item.Path, result.Bytes, result.Seconds, result.Decoded, result.Total, result.PeakMiB});
             }
             else if (result.Error) report.Failed.push_back({result.Item.Path, result.Error->Level, result.Error->Format()});
         }

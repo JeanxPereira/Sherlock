@@ -120,12 +120,15 @@ namespace Sherlock::Store
                                "(SELECT Value FROM Meta WHERE Key = 'SchemaVersion')");
         if (!read)
         {
-            return Fail(DiagnosticCode::Mismatch, Severity::NotVerified, "CheckSchema", db.Path().string(),
-                        "the file carries no Sherlock schema", "rebuild it with Sherlock build facts");
+            return std::unexpected(read.error());
         }
         auto row = read->Step();
-        const std::string actualKind(row && *row ? read->Text(0) : "");
-        const std::string version(row && *row ? read->Text(1) : "");
+        if (!row)
+        {
+            return std::unexpected(row.error());
+        }
+        const std::string actualKind(*row ? read->Text(0) : "");
+        const std::string version(*row ? read->Text(1) : "");
         if (actualKind != kind || version != std::to_string(kSchemaVersion))
         {
             return Fail(DiagnosticCode::Mismatch, Severity::NotVerified, "CheckSchema", db.Path().string(),

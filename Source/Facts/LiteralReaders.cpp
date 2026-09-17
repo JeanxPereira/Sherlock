@@ -4,6 +4,7 @@
 
 #include <array>
 #include <charconv>
+#include <limits>
 #include <optional>
 
 namespace Sherlock::Facts
@@ -38,12 +39,26 @@ namespace Sherlock::Facts
                 return std::nullopt;
             }
             text.remove_prefix(1);
-            std::int64_t value   = 0;
+            bool negative = false;
+            if (!text.empty() && (text.front() == '-' || text.front() == '+'))
+            {
+                negative = text.front() == '-';
+                text.remove_prefix(1);
+            }
             const int     base   = (text.size() > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) ? 16 : 10;
             const auto    digits = base == 16 ? text.substr(2) : text;
-            const auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), value, base);
-            return ec == std::errc{} && ptr == digits.data() + digits.size() ? std::optional<std::int64_t>(value)
-                                                                              : std::nullopt;
+            std::uint64_t magnitude = 0;
+            const auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), magnitude, base);
+            if (digits.empty() || ec != std::errc{} || ptr != digits.data() + digits.size()) return std::nullopt;
+            constexpr auto kMaximum = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+            if (!negative)
+            {
+                return magnitude <= kMaximum ? std::optional<std::int64_t>(static_cast<std::int64_t>(magnitude))
+                                             : std::nullopt;
+            }
+            if (magnitude > kMaximum + 1) return std::nullopt;
+            if (magnitude == kMaximum + 1) return std::numeric_limits<std::int64_t>::min();
+            return -static_cast<std::int64_t>(magnitude);
         }
 
         std::optional<std::uint64_t> AddOffset(std::uint64_t base, std::int64_t offset)
