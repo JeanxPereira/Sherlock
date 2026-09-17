@@ -52,7 +52,7 @@ namespace Sherlock::Facts
     StreamCoverage Disassembler::Stream(std::span<const std::byte> code, std::uint64_t base,
                                         const std::function<void(const Instruction&)>& onInstruction)
     {
-        StreamCoverage coverage{0, code.size()};
+        StreamCoverage coverage{0, code.size() / 4};
         cs_insn*       insn    = ::cs_malloc(_handle);
         const auto*    cursor  = reinterpret_cast<const std::uint8_t*>(code.data());
         std::size_t    left    = code.size();
@@ -62,7 +62,7 @@ namespace Sherlock::Facts
         {
             if (::cs_disasm_iter(_handle, &cursor, &left, &address, insn))
             {
-                coverage.Decoded += insn->size;
+                coverage.Decoded += insn->size / 4;
                 onInstruction(Instruction{insn->address, std::string_view(insn->mnemonic), std::string_view(insn->op_str)});
             }
             else if (left >= 4)

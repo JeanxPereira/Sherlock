@@ -38,10 +38,10 @@ namespace
         {
             return;
         }
-        // litref.py DesignLibrary --pools measures 99.9929% (2082936/2083084), not 100%: 37 words in
+        // litref.py DesignLibrary --pools measures 520734/520771 words, not 100%: 37 words in
         // __TEXT.__text are not instructions, and the plan's "decodes 100%" premise does not hold here.
-        ExpectEq(image->Coverage.Decoded, std::uint64_t{2082936}, "DesignLibrary decoded bytes");
-        ExpectEq(image->Coverage.Total, std::uint64_t{2083084}, "DesignLibrary total __text bytes");
+        ExpectEq(image->Coverage.Decoded, std::uint64_t{520734}, "DesignLibrary decoded words");
+        ExpectEq(image->Coverage.Total, std::uint64_t{520771}, "DesignLibrary total __text words");
 
         std::size_t outOfText = 0;
         bool        sawOpacityIsland = false;
@@ -85,8 +85,8 @@ namespace
         {
             return;
         }
-        ExpectEq(image->Coverage.Decoded, std::uint64_t{77633 * 4}, "SystemBannerUI decoded bytes");
-        ExpectEq(image->Coverage.Total, std::uint64_t{77633 * 4}, "SystemBannerUI total bytes");
+        ExpectEq(image->Coverage.Decoded, std::uint64_t{77633}, "SystemBannerUI decoded words");
+        ExpectEq(image->Coverage.Total, std::uint64_t{77633}, "SystemBannerUI total words");
 
         std::size_t hits = 0;
         for (const auto& literal : image->Literals)
