@@ -11,7 +11,8 @@ string(REGEX MATCH "target=([^\n]*)" _ "${SHERLOCK_TARGET_PATHS}")
 set(SHERLOCK_BUILD "${CMAKE_MATCH_1}")
 set(SHERLOCK_CACHE_DIR "${SHERLOCK_CORPUS}/${SHERLOCK_BUILD}/dsc/${SHERLOCK_BUILD}__MacOS")
 set(SHERLOCK_STORE_DIR "${SHERLOCK_CORPUS}/${SHERLOCK_BUILD}/Sherlock")
-set(SHERLOCK_TEST_ENV "SHERLOCK_CACHE=${SHERLOCK_CACHE_DIR};SHERLOCK_STORE=${SHERLOCK_STORE_DIR}")
+set(SHERLOCK_TEST_ENV
+    "SHERLOCK_CACHE=${SHERLOCK_CACHE_DIR};SHERLOCK_STORE=${SHERLOCK_STORE_DIR};SHERLOCK_TOWERS=${SHERLOCK_REPO}/References/scripts/towers.json")
 
 # sherlock_gate(<File> LINKS <targets…>) -> executable SherlockTest<File>, test Sherlock.<File>
 function(sherlock_gate file)
@@ -29,3 +30,11 @@ sherlock_gate(StoreGates LINKS Sherlock::Store)
 sherlock_gate(DyldSharedCacheGates LINKS Sherlock::DyldSharedCache)
 sherlock_gate(MachOGates LINKS Sherlock::DyldSharedCache)
 sherlock_gate(FactsGates LINKS Sherlock::Facts)
+
+sherlock_gate(CliGates LINKS Sherlock::Facts)
+target_sources(SherlockTestCliGates PRIVATE
+    ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Arguments.cpp
+    ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Towers.cpp
+    ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Demangler.cpp)
+target_include_directories(SherlockTestCliGates PRIVATE ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/include)
+target_link_libraries(SherlockTestCliGates PRIVATE nlohmann_json::nlohmann_json)

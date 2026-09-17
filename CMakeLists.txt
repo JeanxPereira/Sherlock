@@ -42,8 +42,18 @@ sherlock_module(DyldSharedCache
     LINKS Sherlock::Foundation Sherlock::MachO)
 
 sherlock_module(Facts
-    SOURCES ${S}/Facts/Disassembler.cpp ${S}/Facts/BranchIsland.cpp ${S}/Facts/LiteralReaders.cpp ${S}/Facts/ImageFacts.cpp
+    SOURCES ${S}/Facts/Disassembler.cpp ${S}/Facts/BranchIsland.cpp ${S}/Facts/LiteralReaders.cpp
+            ${S}/Facts/ImageFacts.cpp ${S}/Facts/Builder.cpp
     LINKS Sherlock::DyldSharedCache Sherlock::Store capstone_static)
+
+add_executable(Sherlock
+    ${S}/SherlockCli/Main.cpp
+    ${S}/SherlockCli/Arguments.cpp
+    ${S}/SherlockCli/Towers.cpp
+    ${S}/SherlockCli/Demangler.cpp)
+target_include_directories(Sherlock PRIVATE ${S}/SherlockCli/include)
+target_link_libraries(Sherlock PRIVATE Sherlock::Facts nlohmann_json::nlohmann_json Psapi)
+sherlock_compile_options(Sherlock)
 
 option(SHERLOCK_BUILD_TESTS "Builds Sherlock's gates" ON)
 if(SHERLOCK_BUILD_TESTS)
