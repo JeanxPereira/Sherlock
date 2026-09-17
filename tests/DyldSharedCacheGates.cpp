@@ -73,9 +73,17 @@ int main()
         std::printf("NOT VERIFIED: %s\n", cache.error().Format().c_str());
         return 2;
     }
-    GateLayout(*cache);
-    GateRead(*cache);
-    GatePointers(*cache);
-    GateRefusesForeignDirectory();
+    try
+    {
+        GateLayout(*cache);
+        GateRead(*cache);
+        GatePointers(*cache);
+        GateRefusesForeignDirectory();
+    }
+    catch (const std::exception& e)
+    {
+        std::printf("FAIL: an exception escaped a gate: %s\n", e.what());
+        return 1;
+    }
     return Finish();
 }
