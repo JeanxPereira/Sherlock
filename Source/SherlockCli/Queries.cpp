@@ -102,45 +102,54 @@ namespace Sherlock::Cli
         }
     }
 
-    void PrintHeader(const QueryEnvironment& env, std::string_view build)
+    Foundation::Expected<void> PrintHeader(const QueryEnvironment& env, std::string_view build)
     {
         auto catalog = Store::Database::Open(env.Store / "Catalog.db", Store::Database::Mode::ReadOnly);
         if (!catalog)
         {
-            std::printf("Sherlock %s . build %.*s . layer 1 facts . catalog unavailable\n", SHERLOCK_VERSION,
-                       static_cast<int>(build.size()), build.data());
-            return;
+            return std::unexpected(catalog.error());
         }
         std::string catalogBuild;
-        if (auto meta = catalog->Prepare("SELECT Value FROM Meta WHERE Key = 'Build'"); meta)
+        auto meta = catalog->Prepare("SELECT Value FROM Meta WHERE Key = 'Build'");
+        if (!meta)
         {
-            const auto row = meta->Step();
-            if (row && *row)
-            {
-                catalogBuild = meta->Text(0);
-            }
+            return std::unexpected(meta.error());
         }
+        const auto buildRow = meta->Step();
+        if (!buildRow)
+        {
+            return std::unexpected(buildRow.error());
+        }
+        if (!*buildRow || meta->Text(0).empty())
+        {
+            return Foundation::Fail(Foundation::DiagnosticCode::NotFound, Foundation::Severity::NotVerified,
+                                    "Cli::PrintHeader", catalog->Path().string(), "Catalog.Build metadata is missing",
+                                    "run Sherlock build facts to populate the catalog");
+        }
+        catalogBuild = meta->Text(0);
         const std::string_view headerBuild = build.empty() ? std::string_view(catalogBuild) : build;
         const auto rows = LoadImages(*catalog);
+        if (!rows)
+        {
+            return std::unexpected(rows.error());
+        }
         std::size_t   done  = 0;
         std::uint64_t read  = 0;
         std::uint64_t total = 0;
-        if (rows)
+        for (const auto& row : *rows)
         {
-            for (const auto& row : *rows)
+            if (row.State == "FactsDone")
             {
-                if (row.State == "FactsDone")
-                {
-                    ++done;
-                    read  += row.CoverageRead;
-                    total += row.CoverageTotal;
-                }
+                ++done;
+                read  += row.CoverageRead;
+                total += row.CoverageTotal;
             }
         }
         std::printf("Sherlock %s \xC2\xB7 build %.*s \xC2\xB7 layer 1 facts \xC2\xB7 %zu image(s) \xC2\xB7 coverage "
                    "%llu/%llu instructions\n",
                    SHERLOCK_VERSION, static_cast<int>(headerBuild.size()), headerBuild.data(), done,
                    static_cast<unsigned long long>(read), static_cast<unsigned long long>(total));
+        return {};
     }
 
     Verdict RunCallers(const QueryEnvironment& env, std::uint64_t address)
@@ -396,7 +405,16 @@ namespace Sherlock::Cli
         }
         std::printf("callees: %zu\n", calleeCount);
 
-        return {VerdictKind::Found, 1, {}, owned->Image.CoverageRead, owned->Image.CoverageTotal};
+        const auto callerVerdict = RunCallers(env, static_cast<std::uint64_t>(*functionAddress));
+        if (callerVerdict.Kind == VerdictKind::NotVerified)
+        {
+            return callerVerdict;
+        }
+        std::printf("callers: %zu\n", callerVerdict.Count);
+
+        // q's caller summary scans every FactsDone store, including the owning image.
+        // Its coverage therefore represents the full query scope and counts each image once.
+        return {VerdictKind::Found, 1, {}, callerVerdict.Read, callerVerdict.Total};
     }
 
     Verdict RunCalls(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::uint64_t address)

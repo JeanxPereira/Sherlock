@@ -3,6 +3,7 @@
 #pragma once
 
 #include <DyldSharedCache/Cache.h>
+#include <Foundation/Diagnostic.h>
 #include <SherlockCli/Verdict.h>
 
 #include <cstdint>
@@ -18,7 +19,7 @@ namespace Sherlock::Cli
         bool                  Json = false;
     };
 
-    void PrintHeader(const QueryEnvironment& env, std::string_view build);
+    Foundation::Expected<void> PrintHeader(const QueryEnvironment& env, std::string_view build);
 
     Verdict RunQuery(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::string_view target);
     Verdict RunCallers(const QueryEnvironment& env, std::uint64_t address);

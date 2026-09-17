@@ -136,9 +136,22 @@ int main(int argc, char** argv)
     }
 
     Cli::QueryEnvironment env{invocation->Store, invocation->Full, invocation->Json};
+    const auto printHeader = [&]() {
+        const auto header = Cli::PrintHeader(env, "");
+        if (header)
+        {
+            return true;
+        }
+        const Cli::Verdict verdict{Cli::VerdictKind::NotVerified, 0, header.error().Format(), 0, 0};
+        std::printf("%s\n", Cli::FormatVerdict(verdict).c_str());
+        return false;
+    };
     if (invocation->Command == "status")
     {
-        Cli::PrintHeader(env, "");
+        if (!printHeader())
+        {
+            return 2;
+        }
         const auto verdict = Cli::RunStatus(env);
         std::printf("demangler: %s\n",
                     Cli::Demangler::Load(Cli::DefaultDemanglerPath()).has_value() ? "available" : "absent");
@@ -148,7 +161,10 @@ int main(int argc, char** argv)
     if (invocation->Command == "q" || invocation->Command == "callers" || invocation->Command == "calls" ||
         invocation->Command == "refs")
     {
-        Cli::PrintHeader(env, "");
+        if (!printHeader())
+        {
+            return 2;
+        }
         if (invocation->Positional.empty())
         {
             std::printf("verdict: NOT VERIFIED no address or symbol given\n");

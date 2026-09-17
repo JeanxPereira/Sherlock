@@ -55,7 +55,8 @@ endfunction()
 
 sherlock_query_test(QueryOwner    q 0x240622d98                          MATCH "DesignLibrary")
 sherlock_query_test(QueryHeader   q 0x240622d98                          MATCH "build 26A5416b")
-sherlock_query_test(QueryOwnerCoverage q 0x240622d98                     MATCH "verdict: FOUND 1  coverage 520734/520771")
+sherlock_query_test(QueryOwnerCoverage q 0x240622d98                     MATCH "verdict: FOUND 1  coverage 22798615/22799028")
+sherlock_query_test(QueryCallerSummary q 0x2230edebc                     MATCH "callers: 5")
 sherlock_query_test(QueryUnmapped q 0x7ffff0000                          MATCH "verdict: NOT VERIFIED")
 sherlock_query_test(QueryCallers  callers 0x2230edebc                    MATCH "0x240679e58")
 sherlock_query_test(QueryCalls    calls 0x2406780f0                      MATCH "verdict: FOUND")
@@ -74,3 +75,9 @@ add_test(NAME Sherlock.QueryCallersWithoutCache
 set_tests_properties(Sherlock.QueryCallersWithoutCache PROPERTIES
         FIXTURES_REQUIRED SherlockStore
         PASS_REGULAR_EXPRESSION "0x240679e58")
+
+foreach(scenario IN ITEMS meta-prepare meta-step images)
+    add_test(NAME Sherlock.QueryHeaderFailure.${scenario}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/QueryHeaderFailure.py
+                $<TARGET_FILE:Sherlock> ${CMAKE_CURRENT_BINARY_DIR} ${scenario})
+endforeach()
