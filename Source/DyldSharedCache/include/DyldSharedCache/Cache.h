@@ -37,6 +37,15 @@ namespace Sherlock::DyldSharedCache
         Expected<std::uint64_t>              DecodePointer(std::uint64_t slot) const;
         Expected<bool>                       IsRebased(std::uint64_t slot) const;
 
+        struct AddressOwner
+        {
+            const CacheImage* Image = nullptr;
+            std::string_view  Segment;
+        };
+
+        std::optional<AddressOwner>  Owner(std::uint64_t va) const;
+        Expected<const CacheImage*>  FindImage(std::string_view nameOrPath) const;
+
         const std::vector<CacheImage>& Images() const noexcept { return _images; }
         std::string_view               Uuid() const noexcept { return _uuid; }
         std::size_t                    SubcacheCount() const noexcept { return _subcacheCount; }
@@ -63,6 +72,14 @@ namespace Sherlock::DyldSharedCache
             std::optional<Slide> SlideInfo;
         };
 
+        struct OwnerEntry
+        {
+            std::uint64_t     Address = 0;
+            std::uint64_t     End     = 0;
+            const CacheImage* Image   = nullptr;
+            std::string       Segment;
+        };
+
         Cache() = default;
         const Mapping*                       Find(std::uint64_t va) const noexcept;
         Expected<const Mapping*>             FindSlide(std::uint64_t slot, const char* operation) const;
@@ -73,5 +90,6 @@ namespace Sherlock::DyldSharedCache
         std::vector<CacheImage>             _images;
         std::string                         _uuid;
         std::size_t                         _subcacheCount = 0;
+        std::vector<OwnerEntry>             _ownerIndex;
     };
 }

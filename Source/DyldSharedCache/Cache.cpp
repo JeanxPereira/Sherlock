@@ -4,6 +4,7 @@
 #include <DyldSharedCache/Format.h>
 
 #include <Foundation/ByteReader.h>
+#include <MachO/Image.h>
 
 #include <algorithm>
 #include <format>
@@ -231,6 +232,28 @@ namespace Sherlock::DyldSharedCache
             return a.Address == b.Address && a.Size == b.Size;
         });
         cache._mappings.erase(last, cache._mappings.end());
+
+        // __LINKEDIT is shared by every image, so it names none of them; every other
+        // segment goes into the owner index the first query needs.
+        for (const auto& image : cache._images)
+        {
+            const auto parsed = MachO::Image::Parse(cache, image.Header);
+            if (!parsed)
+            {
+                return std::unexpected(parsed.error());
+            }
+            for (const auto& segment : parsed->Segments())
+            {
+                if (segment.Name == "__LINKEDIT" || segment.Size == 0)
+                {
+                    continue;
+                }
+                cache._ownerIndex.push_back({segment.Address, segment.Address + segment.Size, &image, segment.Name});
+            }
+        }
+        std::sort(cache._ownerIndex.begin(), cache._ownerIndex.end(),
+                  [](const OwnerEntry& a, const OwnerEntry& b) { return a.Address < b.Address; });
+
         return cache;
     }
 
@@ -370,5 +393,79 @@ namespace Sherlock::DyldSharedCache
             link += delta * 8;
         }
         return false;
+    }
+
+    std::optional<Cache::AddressOwner> Cache::Owner(std::uint64_t va) const
+    {
+        auto it = std::upper_bound(_ownerIndex.begin(), _ownerIndex.end(), va,
+                                   [](std::uint64_t value, const OwnerEntry& e) { return value < e.Address; });
+        if (it == _ownerIndex.begin())
+        {
+            return std::nullopt;
+        }
+        --it;
+        if (va - it->Address >= it->End - it->Address)
+        {
+            return std::nullopt;
+        }
+        return AddressOwner{it->Image, std::string_view(it->Segment)};
+    }
+
+    Expected<const CacheImage*> Cache::FindImage(std::string_view nameOrPath) const
+    {
+        for (const auto& image : _images)
+        {
+            if (image.Path == nameOrPath)
+            {
+                return &image;
+            }
+        }
+
+        std::vector<const CacheImage*> byBasename;
+        for (const auto& image : _images)
+        {
+            const auto             slash    = image.Path.rfind('/');
+            const std::string_view basename = slash == std::string::npos
+                                                  ? std::string_view(image.Path)
+                                                  : std::string_view(image.Path).substr(slash + 1);
+            if (basename == nameOrPath)
+            {
+                byBasename.push_back(&image);
+            }
+        }
+        if (byBasename.empty())
+        {
+            return Fail(DiagnosticCode::NotFound, Severity::NotVerified, "Cache::FindImage", std::string(nameOrPath),
+                        "no image path or basename matches", "name a path or basename present in this cache");
+        }
+        if (byBasename.size() == 1)
+        {
+            return byBasename.front();
+        }
+
+        std::vector<const CacheImage*> narrowed;
+        for (const CacheImage* image : byBasename)
+        {
+            if (image->Path.starts_with("/System/Library/") || image->Path.starts_with("/usr/"))
+            {
+                narrowed.push_back(image);
+            }
+        }
+        if (narrowed.size() == 1)
+        {
+            return narrowed.front();
+        }
+        const std::vector<const CacheImage*>& pool = narrowed.empty() ? byBasename : narrowed;
+        std::string                           listing;
+        for (std::size_t i = 0; i < pool.size() && i < 6; ++i)
+        {
+            if (i > 0)
+            {
+                listing += ", ";
+            }
+            listing += pool[i]->Path;
+        }
+        return Fail(DiagnosticCode::Usage, Severity::NotVerified, "Cache::FindImage", std::string(nameOrPath),
+                    std::format("{} image(s) match: {}", pool.size(), listing), "name the exact install path");
     }
 }
