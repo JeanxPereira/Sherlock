@@ -53,6 +53,27 @@ sherlock_module(DocumentIndex
             ${S}/DocumentIndex/FileStamp.cpp ${S}/DocumentIndex/Builder.cpp
     LINKS Sherlock::Foundation Sherlock::Store)
 
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/SherlockIdaSdk.cmake)
+
+# Layer 2 is a separate executable: the IDA SDK never enters the Sherlock binary's link line,
+# so a clone without IDA builds everything else and every layer-1 and layer-3 command works.
+if(SHERLOCK_IDA_FOUND)
+    add_executable(SherlockHexRays ${S}/HexRaysExport/WorkerMain.cpp)
+    target_include_directories(SherlockHexRays PRIVATE ${SHERLOCK_IDA_SDK}/include)
+    target_link_libraries(SherlockHexRays PRIVATE
+        ${SHERLOCK_IDA_SDK}/lib/x64_win_vc_64/ida.lib
+        ${SHERLOCK_IDA_SDK}/lib/x64_win_vc_64/idalib.lib)
+    target_compile_definitions(SherlockHexRays PRIVATE __NT__ __EA64__)
+    # IDA's import libraries and DLLs are built against the release CRT; a Debug configuration
+    # would otherwise hand this target /MDd and two heaps.
+    set_target_properties(SherlockHexRays PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+    sherlock_compile_options(SherlockHexRays)
+    # The SDK headers are not clean under /W4 /permissive-, and they are not ours to fix.
+    if(MSVC)
+        target_compile_options(SherlockHexRays PRIVATE /external:I${SHERLOCK_IDA_SDK}/include /external:W0)
+    endif()
+endif()
+
 add_executable(Sherlock
     ${S}/SherlockCli/Main.cpp
     ${S}/SherlockCli/Arguments.cpp

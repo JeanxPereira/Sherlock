@@ -218,3 +218,20 @@ add_test(NAME Sherlock.StatusLayerThree
 set_tests_properties(Sherlock.StatusLayerThree PROPERTIES
         FIXTURES_REQUIRED SherlockDocuments
         PASS_REGULAR_EXPRESSION "changed: [0-9]+, added: [0-9]+, removed: [0-9]+")
+
+# Layer 2's gates exist only where an SDK matching the installed decompiler was found: the
+# worker target does not exist otherwise, and a gate over a target that was never built would
+# report the absence of IDA as a defect in Sherlock.
+if(SHERLOCK_IDA_FOUND)
+    add_test(NAME Sherlock.HexRaysSdkGate
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysSdkGate.py)
+    set_tests_properties(Sherlock.HexRaysSdkGate PROPERTIES ENVIRONMENT
+            "SHERLOCK_HEXRAYS_WORKER=$<TARGET_FILE:SherlockHexRays>;SHERLOCK_IDA_DIR=${SHERLOCK_IDA_DIR};SHERLOCK_IDA_API=${SHERLOCK_IDA_API}")
+
+    # The mutation of the pairing check, kept as a gate instead of run by hand: script mode
+    # exercises the module alone, so it costs a second and never touches the dependencies.
+    add_test(NAME Sherlock.HexRaysSdkRefusal
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysSdkRefusalGate.py)
+    set_tests_properties(Sherlock.HexRaysSdkRefusal PROPERTIES ENVIRONMENT
+            "CMAKE_COMMAND=${CMAKE_COMMAND};SHERLOCK_IDA_SDK_MODULE=${SHERLOCK_REPO}/tools/Sherlock/cmake/SherlockIdaSdk.cmake;SHERLOCK_IDA_DIR=${SHERLOCK_IDA_DIR};SHERLOCK_IDA_API=${SHERLOCK_IDA_API}")
+endif()
