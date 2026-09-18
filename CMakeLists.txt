@@ -48,7 +48,7 @@ sherlock_module(Facts
 
 sherlock_module(DocumentIndex
     SOURCES ${S}/DocumentIndex/Heading.cpp ${S}/DocumentIndex/ConceptFrontMatter.cpp
-            ${S}/DocumentIndex/LaudoSections.cpp
+            ${S}/DocumentIndex/LaudoSections.cpp ${S}/DocumentIndex/CitationExtractor.cpp
     LINKS Sherlock::Foundation)
 
 add_executable(Sherlock

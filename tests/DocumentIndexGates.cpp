@@ -2,6 +2,7 @@
 // Unit gates for DocumentIndex's pure parsers, over the fixtures in tests/Sherlock/fixtures/.
 #include "SherlockHarness.h"
 
+#include <DocumentIndex/CitationExtractor.h>
 #include <DocumentIndex/Heading.h>
 #include <DocumentIndex/LaudoSections.h>
 
@@ -89,6 +90,51 @@ namespace
         ExpectEq(sections->size(), std::size_t(1), "a concept page is exactly one Section");
         ExpectEq((*sections)[0].Title, "The colour-matrix product", "Title comes from the front matter");
     }
+
+    void TestCitationExtraction()
+    {
+        const auto text      = ReadFixture("citation-sample.md");
+        const auto citations = DocumentIndex::ExtractCitations(text);
+        std::size_t addresses = 0, symbols = 0;
+        bool sawTargetAddress = false, sawShortHexAsAddress = false;
+        bool sawMangled = false, sawDottedSymbol = false, sawSecondDottedSymbol = false;
+        bool sawFileNameAsSymbol = false, sawPathAsSymbol = false, sawBareWordAsSymbol = false;
+        for (const auto& citation : citations)
+        {
+            if (citation.Address)
+            {
+                ++addresses;
+                sawTargetAddress     = sawTargetAddress || *citation.Address == 0x27c198c20ull;
+                sawShortHexAsAddress = sawShortHexAsAddress || *citation.Address == 0x1a2bull;
+            }
+            if (citation.Symbol)
+            {
+                ++symbols;
+                sawMangled             = sawMangled || citation.Symbol->starts_with("_$s");
+                sawDottedSymbol        = sawDottedSymbol || *citation.Symbol == "GlassMaterialProvider.Configuration";
+                sawSecondDottedSymbol  = sawSecondDottedSymbol ||
+                                         *citation.Symbol == "GlassEdgeMaterialProvider.resolveLayers";
+                sawFileNameAsSymbol    = sawFileNameAsSymbol || *citation.Symbol == "WindowControlColors.h";
+                sawPathAsSymbol        = sawPathAsSymbol || *citation.Symbol == "Assets/Icons.Bundle";
+                sawBareWordAsSymbol    = sawBareWordAsSymbol || *citation.Symbol == "DesignLibrary" ||
+                                         *citation.Symbol == "DarkShadow";
+            }
+        }
+        ExpectEq(addresses, std::size_t(1),
+                "0x27c198c20 appears twice in prose, once bare, and dedupes to one Address; the short "
+                "hex-ish 0x1a2b token never qualifies");
+        Expect(sawTargetAddress, "the deduped address is the one the fixture cites");
+        Expect(!sawShortHexAsAddress, "0x1a2b has too few hex digits to become an Address citation");
+        ExpectEq(symbols, std::size_t(3),
+                "extraction closes on exactly the three real symbols: two dotted chains and the "
+                "mangled name -- a file name, a path and a dotted mention repeated twice never add up");
+        Expect(sawMangled, "the mangled _$s... token becomes a Symbol");
+        Expect(sawDottedSymbol, "a dotted Apple-style chain becomes a Symbol");
+        Expect(sawSecondDottedSymbol, "a second, distinct dotted chain also becomes a Symbol");
+        Expect(!sawFileNameAsSymbol, "WindowControlColors.h is excluded as a file name, not a symbol");
+        Expect(!sawPathAsSymbol, "Assets/Icons.Bundle is excluded as a path, not a symbol");
+        Expect(!sawBareWordAsSymbol, "a dotless backtick word is never mistaken for a dotted symbol");
+    }
 }
 
 int main()
@@ -96,5 +142,6 @@ int main()
     TestHeadingParsing();
     TestSplitDocumentLaudo();
     TestSplitDocumentConcept();
+    TestCitationExtraction();
     return Finish();
 }
