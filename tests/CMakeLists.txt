@@ -30,6 +30,7 @@ sherlock_gate(StoreGates LINKS Sherlock::Store)
 sherlock_gate(DyldSharedCacheGates LINKS Sherlock::DyldSharedCache)
 sherlock_gate(MachOGates LINKS Sherlock::DyldSharedCache)
 sherlock_gate(FactsGates LINKS Sherlock::Facts)
+sherlock_gate(DocumentIndexGates LINKS Sherlock::DocumentIndex)
 
 sherlock_gate(CliGates LINKS Sherlock::Facts)
 target_sources(SherlockTestCliGates PRIVATE

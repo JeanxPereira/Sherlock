@@ -46,6 +46,10 @@ sherlock_module(Facts
             ${S}/Facts/ImageFacts.cpp ${S}/Facts/Builder.cpp
     LINKS Sherlock::DyldSharedCache Sherlock::Store capstone_static)
 
+sherlock_module(DocumentIndex
+    SOURCES ${S}/DocumentIndex/Heading.cpp
+    LINKS Sherlock::Foundation)
+
 add_executable(Sherlock
     ${S}/SherlockCli/Main.cpp
     ${S}/SherlockCli/Arguments.cpp

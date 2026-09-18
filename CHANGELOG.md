@@ -2,6 +2,10 @@
 
 Each version states what it adds and the measurement behind every performance claim.
 
+## Unreleased
+
+- DocumentIndex: fence-aware markdown heading parser (`Heading`, `ParseHeadings`) -- the first piece layer 3 needs to turn a laudo into addressable sections.
+
 ## 0.1.0
 
 - Foundation: `Diagnostic`, `Expected`, `ByteReader`, `MappedFile`.
