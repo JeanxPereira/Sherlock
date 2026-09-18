@@ -14,12 +14,41 @@
 
 #include <algorithm>
 #include <fstream>
+#include <istream>
 #include <sstream>
+#include <stdexcept>
 
 using namespace Sherlock;
 
 namespace
 {
+    class FailingReadBuffer final : public std::streambuf
+    {
+    public:
+        explicit FailingReadBuffer(std::string text) : text_(std::move(text)) {}
+
+    protected:
+        int_type underflow() override
+        {
+            if (offset_ == text_.size())
+            {
+                throw std::ios_base::failure("injected read failure");
+            }
+            return traits_type::to_int_type(text_[offset_]);
+        }
+
+        int_type uflow() override
+        {
+            const auto character = underflow();
+            ++offset_;
+            return character;
+        }
+
+    private:
+        std::string text_;
+        std::size_t offset_ = 0;
+    };
+
     std::filesystem::path FixturePath(const char* name)
     {
         return std::filesystem::path(__FILE__).parent_path() / "fixtures" / name;
@@ -107,6 +136,14 @@ namespace
                      "a section keeps its original CRLF bytes through the next peer heading");
         }
         std::filesystem::remove_all(root, cleanupError);
+    }
+
+    void TestSplitDocumentRejectsReadFailure()
+    {
+        FailingReadBuffer buffer("# 1 Incomplete\\n");
+        std::istream      stream(&buffer);
+        const auto sections = DocumentIndex::SplitDocument(stream, "docs/re/incomplete.md", "injected stream");
+        Expect(!sections, "SplitDocument rejects an injected stream read failure");
     }
 
     void TestReadCurrentHead()
@@ -370,6 +407,14 @@ namespace
             Expect(!row.Symbol.has_value(), "Seal.Symbol stays null in phase 2 (decision 5)");
         }
     }
+
+    void TestExtractSealsRejectsReadFailure()
+    {
+        FailingReadBuffer buffer("// [BIN] DesignLibrary 0x27c198c20\\n");
+        std::istream      stream(&buffer);
+        const auto seals = DocumentIndex::ExtractSeals(stream, "Source/Incomplete.h", "injected stream");
+        Expect(!seals, "ExtractSeals rejects an injected stream read failure");
+    }
 }
 
 int main()
@@ -377,6 +422,7 @@ int main()
     TestHeadingParsing();
     TestSplitDocumentLaudo();
     TestSplitDocumentKeepsSourceBytes();
+    TestSplitDocumentRejectsReadFailure();
     TestSplitDocumentConcept();
     TestReadCurrentHead();
     TestBuildDocumentsWritesCoverageFilesAndMeta();
@@ -384,5 +430,6 @@ int main()
     TestBuildDocumentsRollsBackSchemaAfterInputFailure();
     TestCitationExtraction();
     TestSealExtraction();
+    TestExtractSealsRejectsReadFailure();
     return Finish();
 }

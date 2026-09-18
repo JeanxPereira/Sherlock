@@ -6,7 +6,6 @@
 #include <fstream>
 #include <optional>
 #include <regex>
-#include <sstream>
 #include <utility>
 
 namespace Sherlock::DocumentIndex
@@ -30,22 +29,30 @@ namespace Sherlock::DocumentIndex
             std::string Tag;
         };
 
-        Foundation::Expected<std::string> ReadWhole(const std::filesystem::path& file)
+        Foundation::Expected<std::string> ReadWhole(std::istream&     stream,
+                                                     std::string_view operation,
+                                                     std::string_view subject)
         {
-            std::ifstream stream(file, std::ios::binary);
-            if (!stream)
+            std::string content;
+            char        character = 0;
+            try
             {
-                return Fail(DiagnosticCode::Io, Severity::NotVerified, "ExtractSeals", file.string(),
-                            "the file cannot be opened", "check it exists and is readable");
+                while (stream.get(character))
+                {
+                    content.push_back(character);
+                }
             }
-            std::ostringstream buffer;
-            buffer << stream.rdbuf();
-            if (!stream.eof() && stream.fail())
+            catch (const std::ios_base::failure&)
             {
-                return Fail(DiagnosticCode::Io, Severity::NotVerified, "ExtractSeals", file.string(),
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, std::string(operation), std::string(subject),
                             "the file cannot be read completely", "check it is readable");
             }
-            return buffer.str();
+            if (!stream.eof() && stream.fail())
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, std::string(operation), std::string(subject),
+                            "the file cannot be read completely", "check it is readable");
+            }
+            return content;
         }
 
         // Splits on '\n' and drops a trailing '\r', the same normalisation Python's universal
@@ -198,7 +205,20 @@ namespace Sherlock::DocumentIndex
     Foundation::Expected<std::vector<SealRow>> ExtractSeals(const std::filesystem::path& file,
                                                              std::string_view             repoRelativePath)
     {
-        auto content = ReadWhole(file);
+        std::ifstream stream(file, std::ios::binary);
+        if (!stream)
+        {
+            return Fail(DiagnosticCode::Io, Severity::NotVerified, "ExtractSeals", file.string(),
+                        "the file cannot be opened", "check it exists and is readable");
+        }
+        return ExtractSeals(stream, repoRelativePath, file.string());
+    }
+
+    Foundation::Expected<std::vector<SealRow>> ExtractSeals(std::istream&     stream,
+                                                            std::string_view repoRelativePath,
+                                                            std::string_view diagnosticSubject)
+    {
+        auto content = ReadWhole(stream, "ExtractSeals", diagnosticSubject);
         if (!content)
         {
             return std::unexpected(content.error());

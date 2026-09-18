@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <istream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -37,4 +38,7 @@ namespace Sherlock::DocumentIndex
     // reports).
     Foundation::Expected<std::vector<SealRow>> ExtractSeals(const std::filesystem::path& file,
                                                              std::string_view             repoRelativePath);
+    Foundation::Expected<std::vector<SealRow>> ExtractSeals(std::istream&     stream,
+                                                            std::string_view repoRelativePath,
+                                                            std::string_view diagnosticSubject);
 }

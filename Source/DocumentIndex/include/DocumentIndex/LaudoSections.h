@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <istream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -29,4 +30,7 @@ namespace Sherlock::DocumentIndex
     // whole file, Number null, Title = the front matter's title, spanning line 1 through EOF.
     Foundation::Expected<std::vector<DocSection>> SplitDocument(const std::filesystem::path& file,
                                                                 std::string_view              repoRelativePath);
+    Foundation::Expected<std::vector<DocSection>> SplitDocument(std::istream&     stream,
+                                                                std::string_view repoRelativePath,
+                                                                std::string_view diagnosticSubject);
 }
