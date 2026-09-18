@@ -43,6 +43,29 @@ namespace Sherlock::Store
             CREATE INDEX IF NOT EXISTS SymbolName ON Symbol(Name);
         )sql";
 
+        constexpr std::string_view kDocumentTables = R"sql(
+            CREATE TABLE IF NOT EXISTS Meta(Key TEXT PRIMARY KEY, Value TEXT NOT NULL) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS Coverage(Root TEXT PRIMARY KEY, Read INTEGER NOT NULL,
+                Total INTEGER NOT NULL) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS File(Path TEXT PRIMARY KEY, Size INTEGER NOT NULL,
+                MTime INTEGER NOT NULL) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS Section(Id INTEGER PRIMARY KEY, File TEXT NOT NULL, Number TEXT,
+                Title TEXT NOT NULL, FirstLine INTEGER NOT NULL, LastLine INTEGER NOT NULL, Text TEXT NOT NULL);
+            CREATE VIRTUAL TABLE IF NOT EXISTS SectionFtsTitle USING fts5(
+                Title, content='Section', content_rowid='Id', tokenize='unicode61');
+            CREATE VIRTUAL TABLE IF NOT EXISTS SectionFtsText USING fts5(
+                Text, content='Section', content_rowid='Id', tokenize='trigram');
+            CREATE TABLE IF NOT EXISTS Citation(Section INTEGER NOT NULL, Address INTEGER, Symbol TEXT);
+            CREATE TABLE IF NOT EXISTS Seal(File TEXT NOT NULL, Line INTEGER NOT NULL, Tag TEXT NOT NULL,
+                Image TEXT, Symbol TEXT, Address INTEGER);
+        )sql";
+
+        constexpr std::string_view kDocumentIndexes = R"sql(
+            CREATE INDEX IF NOT EXISTS CitationAddress ON Citation(Address);
+            CREATE INDEX IF NOT EXISTS CitationSymbol ON Citation(Symbol);
+            CREATE INDEX IF NOT EXISTS SealAddress ON Seal(Address);
+        )sql";
+
         Expected<void> WriteMeta(Database& db, std::string_view key, std::string_view value)
         {
             auto statement = db.Prepare("INSERT OR REPLACE INTO Meta(Key, Value) VALUES(?1, ?2)");
@@ -65,7 +88,8 @@ namespace Sherlock::Store
             return {};
         }
 
-        Expected<void> CreateWithMeta(Database& db, std::string_view tables, std::string_view kind)
+        Expected<void> CreateWithMeta(Database& db, std::string_view tables, std::string_view kind,
+                                      int schemaVersion = kSchemaVersion)
         {
             if (auto ok = db.Execute(tables); !ok)
             {
@@ -75,7 +99,7 @@ namespace Sherlock::Store
             {
                 return ok;
             }
-            if (auto ok = WriteMeta(db, "SchemaVersion", std::to_string(kSchemaVersion)); !ok)
+            if (auto ok = WriteMeta(db, "SchemaVersion", std::to_string(schemaVersion)); !ok)
             {
                 return ok;
             }
@@ -114,7 +138,7 @@ namespace Sherlock::Store
         return db.Execute(kImageIndexes);
     }
 
-    Expected<void> CheckSchema(Database& db, std::string_view kind)
+    Expected<void> CheckSchema(Database& db, std::string_view kind, int expectedVersion)
     {
         auto read = db.Prepare("SELECT (SELECT Value FROM Meta WHERE Key = 'Kind'), "
                                "(SELECT Value FROM Meta WHERE Key = 'SchemaVersion')");
@@ -129,14 +153,29 @@ namespace Sherlock::Store
         }
         const std::string actualKind(*row ? read->Text(0) : "");
         const std::string version(*row ? read->Text(1) : "");
-        if (actualKind != kind || version != std::to_string(kSchemaVersion))
+        if (actualKind != kind || version != std::to_string(expectedVersion))
         {
             return Fail(DiagnosticCode::Mismatch, Severity::NotVerified, "CheckSchema", db.Path().string(),
                         std::format("found {} schema {}, expected {} schema {}", actualKind.empty() ? "no" : actualKind,
-                                    version.empty() ? "none" : version, kind, kSchemaVersion),
+                                    version.empty() ? "none" : version, kind, expectedVersion),
                         "rebuild it with Sherlock build facts");
         }
         return {};
+    }
+
+    Expected<void> CreateDocumentsStore(Database& db)
+    {
+        return CreateWithMeta(db, kDocumentTables, "Documents", kDocumentsSchemaVersion);
+    }
+
+    Expected<void> CreateDocumentIndexes(Database& db)
+    {
+        return db.Execute(kDocumentIndexes);
+    }
+
+    Expected<void> CheckDocumentsSchema(Database& db)
+    {
+        return CheckSchema(db, "Documents", kDocumentsSchemaVersion);
     }
 
     Expected<std::string> ReadMeta(Database& db, std::string_view key)
