@@ -155,6 +155,19 @@ endfunction()
 sherlock_documents_query_test(QueryCitedBy  q 0x27c198c20 MATCH "cited by.*resolvelayers-recon")
 sherlock_documents_query_test(QuerySealedAt q 0x22695fe48 MATCH "sealed at.*SnippetSizeConstants")
 
+# find and laudo themselves, against the same real corpus -- QueryCitedBy/QuerySealedAt above
+# prove q's layer-3 lines; these prove the commands Task 7 exists for.
+sherlock_documents_query_test(LaudoOutline   laudo 2026-08-22-resolvelayers-recon  MATCH "7.*LayerResolver")
+sherlock_documents_query_test(LaudoSection   laudo 2026-08-22-resolvelayers-recon §7 MATCH "0x27c198c20")
+sherlock_documents_query_test(FindShadowPool find "shadow pool"                    MATCH "systembanner-geometria")
+
+# laudo's own staleness gate (decision 8): a self-contained scratch repo, built and mutated
+# with the real Sherlock.exe -- not the SherlockDocuments fixture above, since it needs to edit
+# a file's content and mtime AFTER the build and observe the CLI itself refuse the stale text.
+add_test(NAME Sherlock.LaudoStalenessGate
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/LaudoStalenessGate.py
+                $<TARGET_FILE:Sherlock> ${CMAKE_CURRENT_BINARY_DIR}/LaudoStalenessScratch)
+
 # Deliberately does NOT require SherlockDocuments, and points --documents at a path that is
 # guaranteed never to exist -- proving decision 4's fallback cannot depend on ctest's run order
 # relative to Sherlock.BuildDocuments, which writes to a fixed, shared path other tests also read.
