@@ -55,6 +55,25 @@ namespace Sherlock::Cli
             }
             return {};
         }
+
+        std::filesystem::path DefaultRepoRoot()
+        {
+            std::filesystem::path dir = std::filesystem::current_path();
+            for (int depth = 0; depth < 32; ++depth)
+            {
+                if (std::filesystem::is_directory(dir / "docs" / "re") && std::filesystem::is_directory(dir / "Source"))
+                {
+                    return dir;
+                }
+                const auto parent = dir.parent_path();
+                if (parent.empty() || parent == dir)
+                {
+                    break;
+                }
+                dir = parent;
+            }
+            return {};
+        }
     }
 
     Expected<Invocation> ParseArguments(int argc, char** argv)
@@ -82,6 +101,19 @@ namespace Sherlock::Cli
         {
             invocation.Store = env;
         }
+        invocation.Repo = DefaultRepoRoot();
+        if (const char* env = std::getenv("SHERLOCK_REPO"); env != nullptr)
+        {
+            invocation.Repo = env;
+        }
+        if (const char* env = std::getenv("SHERLOCK_DOCUMENTS"); env != nullptr)
+        {
+            invocation.Documents = env;
+        }
+        else if (!invocation.Repo.empty())
+        {
+            invocation.Documents = invocation.Repo / "build" / "Sherlock" / "Documents.db";
+        }
         invocation.Towers = DefaultTowersPath();
 
         for (std::size_t i = 1; i < args.size(); ++i)
@@ -107,6 +139,18 @@ namespace Sherlock::Cli
                 const auto v = next();
                 if (!v) return std::unexpected(v.error());
                 invocation.Store = *v;
+            }
+            else if (arg == "--repo")
+            {
+                const auto v = next();
+                if (!v) return std::unexpected(v.error());
+                invocation.Repo = *v;
+            }
+            else if (arg == "--documents")
+            {
+                const auto v = next();
+                if (!v) return std::unexpected(v.error());
+                invocation.Documents = *v;
             }
             else if (arg == "--towers")
             {

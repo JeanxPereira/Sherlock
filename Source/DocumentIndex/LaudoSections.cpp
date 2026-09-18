@@ -29,36 +29,17 @@ namespace Sherlock::DocumentIndex
             return buffer.str();
         }
 
-        std::vector<std::string_view> SliceLines(std::string_view text)
+        std::vector<std::size_t> LineOffsets(std::string_view text)
         {
-            std::vector<std::string_view> lines;
-            std::size_t                    start = 0;
-            while (start <= text.size())
+            std::vector<std::size_t> offsets{0};
+            for (std::size_t offset = 0; offset < text.size(); ++offset)
             {
-                const auto newline = text.find('\n', start);
-                lines.push_back(newline == std::string_view::npos ? text.substr(start)
-                                                                    : text.substr(start, newline - start));
-                if (newline == std::string_view::npos)
+                if (text[offset] == '\n' && offset + 1 < text.size())
                 {
-                    break;
+                    offsets.push_back(offset + 1);
                 }
-                start = newline + 1;
             }
-            return lines;
-        }
-
-        std::string JoinLines(const std::vector<std::string_view>& lines, std::size_t firstLine, std::size_t lastLine)
-        {
-            std::string text;
-            for (std::size_t n = firstLine; n <= lastLine && n <= lines.size(); ++n)
-            {
-                if (n > firstLine)
-                {
-                    text += '\n';
-                }
-                text += lines[n - 1];
-            }
-            return text;
+            return offsets;
         }
     }
 
@@ -70,8 +51,8 @@ namespace Sherlock::DocumentIndex
         {
             return std::unexpected(content.error());
         }
-        const std::string_view text  = *content;
-        const auto             lines = SliceLines(text);
+        const std::string_view text = *content;
+        const auto lineOffsets = LineOffsets(text);
 
         if (repoRelativePath.find("docs/concepts/") != std::string_view::npos)
         {
@@ -84,7 +65,7 @@ namespace Sherlock::DocumentIndex
             section.File      = std::string(repoRelativePath);
             section.Title     = frontMatter->Title.empty() ? std::string(repoRelativePath) : frontMatter->Title;
             section.FirstLine = 1;
-            section.LastLine  = lines.size();
+            section.LastLine  = lineOffsets.size();
             section.Text      = std::string(text);
             return std::vector<DocSection>{std::move(section)};
         }
@@ -98,12 +79,14 @@ namespace Sherlock::DocumentIndex
         sections.reserve(headings.size());
         for (std::size_t i = 0; i < headings.size(); ++i)
         {
-            std::size_t last = lines.size();
+            std::size_t last = lineOffsets.size();
+            std::size_t endOffset = text.size();
             for (std::size_t j = i + 1; j < headings.size(); ++j)
             {
                 if (headings[j].Level <= headings[i].Level)
                 {
                     last = headings[j].Line - 1;
+                    endOffset = lineOffsets[headings[j].Line - 1];
                     break;
                 }
             }
@@ -113,7 +96,7 @@ namespace Sherlock::DocumentIndex
             section.Title      = headings[i].Title;
             section.FirstLine  = headings[i].Line;
             section.LastLine   = last;
-            section.Text       = JoinLines(lines, section.FirstLine, section.LastLine);
+            section.Text       = std::string(text.substr(lineOffsets[section.FirstLine - 1], endOffset - lineOffsets[section.FirstLine - 1]));
             sections.push_back(std::move(section));
         }
         return sections;

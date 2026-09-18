@@ -49,8 +49,9 @@ sherlock_module(Facts
 sherlock_module(DocumentIndex
     SOURCES ${S}/DocumentIndex/Heading.cpp ${S}/DocumentIndex/ConceptFrontMatter.cpp
             ${S}/DocumentIndex/LaudoSections.cpp ${S}/DocumentIndex/CitationExtractor.cpp
-            ${S}/DocumentIndex/SealExtractor.cpp
-    LINKS Sherlock::Foundation)
+            ${S}/DocumentIndex/SealExtractor.cpp ${S}/DocumentIndex/GitHead.cpp
+            ${S}/DocumentIndex/FileStamp.cpp ${S}/DocumentIndex/Builder.cpp
+    LINKS Sherlock::Foundation Sherlock::Store)
 
 add_executable(Sherlock
     ${S}/SherlockCli/Main.cpp
@@ -60,7 +61,7 @@ add_executable(Sherlock
     ${S}/SherlockCli/Verdict.cpp
     ${S}/SherlockCli/Queries.cpp)
 target_include_directories(Sherlock PRIVATE ${S}/SherlockCli/include)
-target_link_libraries(Sherlock PRIVATE Sherlock::Facts nlohmann_json::nlohmann_json Psapi)
+target_link_libraries(Sherlock PRIVATE Sherlock::Facts Sherlock::DocumentIndex nlohmann_json::nlohmann_json Psapi)
 sherlock_compile_options(Sherlock)
 
 option(SHERLOCK_BUILD_TESTS "Builds Sherlock's gates" ON)

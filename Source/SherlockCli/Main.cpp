@@ -1,6 +1,7 @@
 // Sherlock — tools/Sherlock/Source/SherlockCli/Main.cpp
 // Entry point: --version, `build facts`, and the query commands (q, callers, calls, refs, status).
 #include <DyldSharedCache/Cache.h>
+#include <DocumentIndex/Builder.h>
 #include <Facts/Builder.h>
 #include <SherlockCli/Arguments.h>
 #include <SherlockCli/Demangler.h>
@@ -168,6 +169,28 @@ namespace
                         elapsed, peakMiB);
         return report->Failed.empty() ? 0 : (notVerified ? 2 : 1);
     }
+
+    int RunBuildDocs(const Cli::Invocation& invocation)
+    {
+        if (invocation.Repo.empty() || invocation.Documents.empty())
+        {
+            PrintVerdict({Cli::VerdictKind::NotVerified, 0,
+                          "build docs requires --repo and --documents (or their SHERLOCK_* variables)", 0, 0},
+                         invocation.Json);
+            return 2;
+        }
+        auto report = DocumentIndex::BuildDocuments(invocation.Repo, invocation.Documents);
+        if (!report)
+        {
+            PrintVerdict({Cli::VerdictKind::NotVerified, 0, report.error().Format(), 0, 0}, invocation.Json);
+            return 2;
+        }
+        std::printf("built %llu section(s), %llu citation(s), %llu seal(s) in %.1fs, head %s\n",
+                    static_cast<unsigned long long>(report->SectionsWritten),
+                    static_cast<unsigned long long>(report->CitationsWritten),
+                    static_cast<unsigned long long>(report->SealsWritten), report->Seconds, report->Head.c_str());
+        return 0;
+    }
 }
 
 int main(int argc, char** argv)
@@ -188,6 +211,10 @@ int main(int argc, char** argv)
     if (invocation->Command == "build" && !invocation->Positional.empty() && invocation->Positional.front() == "facts")
     {
         return RunBuildFacts(*invocation);
+    }
+    if (invocation->Command == "build" && !invocation->Positional.empty() && invocation->Positional.front() == "docs")
+    {
+        return RunBuildDocs(*invocation);
     }
 
     const bool queryCommand = invocation->Command == "q" || invocation->Command == "callers" ||
