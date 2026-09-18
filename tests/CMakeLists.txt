@@ -51,7 +51,7 @@ target_sources(SherlockTestCliGates PRIVATE
 target_include_directories(SherlockTestCliGates PRIVATE ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/include)
 target_link_libraries(SherlockTestCliGates PRIVATE nlohmann_json::nlohmann_json)
 
-sherlock_gate(DocumentsGates LINKS Sherlock::Store Sherlock::DocumentIndex)
+sherlock_gate(DocumentsGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::DyldSharedCache)
 target_sources(SherlockTestDocumentsGates PRIVATE
     ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Documents.cpp)
 target_include_directories(SherlockTestDocumentsGates PRIVATE

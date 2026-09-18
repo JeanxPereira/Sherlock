@@ -69,13 +69,13 @@ namespace
         fixture.LaudoText = "## §7 LayerResolver\r\n\r\n100% shadow pool.\r\n";
         fixture.ConceptText = "A concept page\n";
         const auto laudo = fixture.Root / "docs" / "re" / "sample.md";
-        const auto concept = fixture.Root / "docs" / "concepts" / "0x27c198c20.md";
+        const auto conceptFile = fixture.Root / "docs" / "concepts" / "0x27c198c20.md";
         {
             std::ofstream stream(laudo, std::ios::binary);
             stream << fixture.LaudoText;
         }
         {
-            std::ofstream stream(concept, std::ios::binary);
+            std::ofstream stream(conceptFile, std::ios::binary);
             stream << fixture.ConceptText;
         }
 
@@ -87,7 +87,7 @@ namespace
         Expect(db->Execute("INSERT INTO Coverage(Root, Read, Total) VALUES('docs/re', 2, 2)").has_value(),
                "the documents fixture writes coverage");
         InsertFile(*db, "docs/re/sample.md", laudo);
-        InsertFile(*db, "docs/concepts/0x27c198c20.md", concept);
+        InsertFile(*db, "docs/concepts/0x27c198c20.md", conceptFile);
         InsertSection(*db, "docs/re/sample.md", "7", "LayerResolver", fixture.LaudoText);
         InsertSection(*db, "docs/concepts/0x27c198c20.md", "", "Concept Title", fixture.ConceptText);
         return fixture;

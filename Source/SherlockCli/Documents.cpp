@@ -11,6 +11,8 @@
 #include <cctype>
 #include <cstdio>
 #include <format>
+#include <fcntl.h>
+#include <io.h>
 #include <map>
 #include <optional>
 #include <string>
@@ -89,7 +91,11 @@ namespace Sherlock::Cli
         void EmitText(const QueryEnvironment& env, std::string text)
         {
             if (env.Output != nullptr) env.Output->push_back(text);
-            if (!env.Json) std::fwrite(text.data(), 1, text.size(), stdout);
+            if (!env.Json)
+            {
+                _setmode(_fileno(stdout), _O_BINARY);
+                std::fwrite(text.data(), 1, text.size(), stdout);
+            }
         }
 
         bool LooksNumeric(std::string_view text)
@@ -205,6 +211,7 @@ namespace Sherlock::Cli
 
         std::string_view number = section;
         if (number.starts_with("\xC2\xA7")) number.remove_prefix(2);
+        else if (!number.empty() && number.front() == static_cast<char>(0xA7)) number.remove_prefix(1);
         const bool numeric = LooksNumeric(number);
         const auto first = FindSection(*db, suffix, number, numeric);
         if (!first) return {VerdictKind::NotVerified, 0, first.error().Format(), coverage->first, coverage->second};

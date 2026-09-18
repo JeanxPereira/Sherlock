@@ -59,14 +59,14 @@ int main(int argc, char** argv)
     const std::string crlf = "## §7 LayerResolver\r\n\r\n100% shadow pool.\r\n";
     const std::string lf = "A concept page\n";
     const auto laudo = root / "docs" / "re" / "sample.md";
-    const auto concept = root / "docs" / "concepts" / "0x27c198c20.md";
+    const auto conceptFile = root / "docs" / "concepts" / "0x27c198c20.md";
     std::ofstream(laudo, std::ios::binary) << crlf;
-    std::ofstream(concept, std::ios::binary) << lf;
+    std::ofstream(conceptFile, std::ios::binary) << lf;
 
     auto db = Store::Database::Open(root / "Documents.db", Store::Database::Mode::ReadWrite);
     if (!db || !Store::CreateDocumentsStore(*db) || !Store::CreateDocumentIndexes(*db) ||
         !db->Execute("INSERT INTO Coverage(Root, Read, Total) VALUES('docs/re', 2, 2)") ||
-        !InsertFile(*db, "docs/re/sample.md", laudo) || !InsertFile(*db, "docs/concepts/0x27c198c20.md", concept) ||
+        !InsertFile(*db, "docs/re/sample.md", laudo) || !InsertFile(*db, "docs/concepts/0x27c198c20.md", conceptFile) ||
         !InsertSection(*db, "docs/re/sample.md", "7", "LayerResolver", crlf) ||
         !InsertSection(*db, "docs/concepts/0x27c198c20.md", "", "Concept Title", lf))
     {
