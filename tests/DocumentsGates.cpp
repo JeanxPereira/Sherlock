@@ -123,6 +123,10 @@ namespace
         Expect(laudo.Kind == Cli::VerdictKind::Found && output == std::vector<std::string>{fixture.LaudoText},
                "laudo falls back to a case-insensitive title match");
         output.clear();
+        const auto sectionTitle = Cli::RunLaudo(Environment(fixture, output), "sample", "§layerresolver");
+        Expect(sectionTitle.Kind == Cli::VerdictKind::Found && output == std::vector<std::string>{fixture.LaudoText},
+               "laudo normalizes an optional section marker before title fallback");
+        output.clear();
         const auto find = Cli::RunFind(Environment(fixture, output), "shadow pool");
         Expect(find.Kind == Cli::VerdictKind::Found && !output.empty() && output.front().find("sample.md 7 -- LayerResolver") != std::string::npos,
                "find works with Documents.db and no facts store");
@@ -151,6 +155,24 @@ namespace
         Expect(failure.Kind == Cli::VerdictKind::NotVerified && !failure.Why.empty(),
                "SQLite prepare failures propagate instead of becoming empty results");
     }
+
+    void GateDocumentsSchemaRefusal()
+    {
+        const auto fixture = CreateFixture();
+        {
+            auto db = Store::Database::Open(fixture.Documents, Store::Database::Mode::ReadWrite);
+            Expect(db.has_value() && db->Execute("UPDATE Meta SET Value = '0' WHERE Key = 'SchemaVersion'").has_value(),
+                   "the fixture corrupts the documents schema metadata");
+        }
+        std::vector<std::string> output;
+        const auto find = Cli::RunFind(Environment(fixture, output), "shadow pool");
+        Expect(find.Kind == Cli::VerdictKind::NotVerified && find.Why.find("CheckSchema") != std::string::npos,
+               "find refuses a Documents.db with the wrong schema version");
+        const auto laudo = Cli::RunLaudo(Environment(fixture, output), "sample", "7");
+        Expect(laudo.Kind == Cli::VerdictKind::NotVerified && laudo.Why.find("CheckSchema") != std::string::npos,
+               "laudo refuses a Documents.db with the wrong schema version");
+        std::filesystem::remove_all(fixture.Root);
+    }
 }
 
 int main()
@@ -159,6 +181,7 @@ int main()
     GateLaudoByteExactAndJsonParity(fixture);
     GateCaseInsensitiveTitleAndNoFactsStore(fixture);
     GateStalenessAndSqliteFailures(fixture);
+    GateDocumentsSchemaRefusal();
     std::filesystem::remove_all(fixture.Root);
     return Finish();
 }

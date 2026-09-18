@@ -57,6 +57,15 @@ target_sources(SherlockTestDocumentsGates PRIVATE
 target_include_directories(SherlockTestDocumentsGates PRIVATE
     ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/include)
 
+add_executable(SherlockDocumentsFixture ${CMAKE_CURRENT_LIST_DIR}/DocumentsFixture.cpp)
+target_link_libraries(SherlockDocumentsFixture PRIVATE Sherlock::Store)
+sherlock_compile_options(SherlockDocumentsFixture)
+
+add_test(NAME Sherlock.LaudoExactOutputGate
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/LaudoExactOutputGate.py
+                $<TARGET_FILE:Sherlock> $<TARGET_FILE:SherlockDocumentsFixture>
+                ${CMAKE_CURRENT_BINARY_DIR}/LaudoExactOutputScratch)
+
 # Sherlock.BuildTowers fills the real store once; every query test below requires it and none rebuilds it.
 add_test(NAME Sherlock.BuildTowers
         COMMAND $<TARGET_FILE:Sherlock> build facts --towers --resume --cache ${SHERLOCK_CACHE_DIR} --store ${SHERLOCK_STORE_DIR})

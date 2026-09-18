@@ -280,6 +280,11 @@ int main(int argc, char** argv)
             ? Cli::RunFind(env, invocation->Positional.front())
             : Cli::RunLaudo(env, invocation->Positional.front(),
                             invocation->Positional.size() > 1 ? std::string_view(invocation->Positional[1]) : "");
+        if (invocation->Command == "laudo" && !invocation->Json && invocation->Positional.size() > 1 &&
+            verdict.Kind == Cli::VerdictKind::Found)
+        {
+            return Cli::ExitCode(verdict);
+        }
         PrintVerdict(verdict, invocation->Json, output);
         return Cli::ExitCode(verdict);
     }

@@ -206,12 +206,12 @@ namespace Sherlock::Cli
         std::string_view number = section;
         if (number.starts_with("\xC2\xA7")) number.remove_prefix(2);
         const bool numeric = LooksNumeric(number);
-        const auto first = FindSection(*db, suffix, numeric ? number : section, numeric);
+        const auto first = FindSection(*db, suffix, number, numeric);
         if (!first) return {VerdictKind::NotVerified, 0, first.error().Format(), coverage->first, coverage->second};
         auto hit = *first;
         if (!hit && !numeric)
         {
-            const auto fallback = FindSection(*db, suffix, section, false, true);
+            const auto fallback = FindSection(*db, suffix, number, false, true);
             if (!fallback) return {VerdictKind::NotVerified, 0, fallback.error().Format(), coverage->first, coverage->second};
             hit = *fallback;
         }
