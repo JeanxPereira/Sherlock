@@ -4,8 +4,10 @@
 
 #include <Foundation/Diagnostic.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string_view>
 
 struct sqlite3;
@@ -27,6 +29,8 @@ namespace Sherlock::Store
         Expected<void> Bind(int index, std::int64_t value);
         Expected<void> Bind(int index, double value);
         Expected<void> Bind(int index, std::string_view value);
+        // A compressed payload holds null bytes, which a TEXT binding truncates at the first one.
+        Expected<void> BindBlob(int index, std::span<const std::byte> value);
         Expected<void> BindNull(int index);
 
         // True when a row is ready to read; false when the statement is done.
@@ -38,6 +42,7 @@ namespace Sherlock::Store
         std::int64_t     Int(int column) const;
         double           Real(int column) const;
         std::string_view Text(int column) const;
+        std::span<const std::byte> Blob(int column) const;
         bool             IsNull(int column) const;
 
     private:

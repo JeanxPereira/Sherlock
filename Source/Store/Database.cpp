@@ -92,6 +92,13 @@ namespace Sherlock::Store
                      "Statement::Bind");
     }
 
+    Expected<void> Statement::BindBlob(int index, std::span<const std::byte> value)
+    {
+        return Check(::sqlite3_bind_blob(_statement, index, value.data(), static_cast<int>(value.size()),
+                                         SQLITE_TRANSIENT),
+                     "Statement::BindBlob");
+    }
+
     Expected<void> Statement::BindNull(int index)
     {
         return Check(::sqlite3_bind_null(_statement, index), "Statement::BindNull");
@@ -129,6 +136,15 @@ namespace Sherlock::Store
         return text == nullptr ? std::string_view{}
                                : std::string_view(reinterpret_cast<const char*>(text),
                                                   static_cast<std::size_t>(::sqlite3_column_bytes(_statement, column)));
+    }
+
+    std::span<const std::byte> Statement::Blob(int column) const
+    {
+        const auto* bytes = ::sqlite3_column_blob(_statement, column);
+        return bytes == nullptr
+                   ? std::span<const std::byte>{}
+                   : std::span(static_cast<const std::byte*>(bytes),
+                               static_cast<std::size_t>(::sqlite3_column_bytes(_statement, column)));
     }
 
     bool Statement::IsNull(int column) const

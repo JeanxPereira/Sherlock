@@ -1,5 +1,5 @@
 # Sherlock — tools/Sherlock/cmake/SherlockDependencies.cmake
-# The three third-party libraries, pinned by tag or by hash.
+# The four third-party libraries, pinned by tag or by hash.
 include(FetchContent)
 
 FetchContent_Declare(sqlite
@@ -31,3 +31,18 @@ FetchContent_Declare(nlohmann_json
     GIT_TAG        v3.12.0
     GIT_SHALLOW    TRUE)
 FetchContent_MakeAvailable(nlohmann_json)
+
+# Layer 2 stores one pseudocode blob per function. Uncompressed, the whole cache projects to
+# several times the disk the corpus has; zstd is what makes the fill fit, so it is a dependency
+# of the store rather than a later optimisation.
+set(ZSTD_BUILD_PROGRAMS   OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED     OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_STATIC     ON  CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
+set(ZSTD_LEGACY_SUPPORT   OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(zstd
+    GIT_REPOSITORY https://github.com/facebook/zstd.git
+    GIT_TAG        v1.5.6
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  build/cmake)
+FetchContent_MakeAvailable(zstd)

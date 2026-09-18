@@ -53,6 +53,13 @@ sherlock_module(DocumentIndex
             ${S}/DocumentIndex/FileStamp.cpp ${S}/DocumentIndex/Builder.cpp
     LINKS Sherlock::Foundation Sherlock::Store)
 
+# No IDA header reaches this module: the CLI and the gates read layer 2 without the SDK, and
+# only the worker's own translation unit decompiles.
+sherlock_module(HexRaysExport
+    SOURCES ${S}/HexRaysExport/Store.cpp
+    LINKS Sherlock::Foundation Sherlock::Store libzstd_static)
+target_include_directories(SherlockHexRaysExport PRIVATE ${zstd_SOURCE_DIR}/lib)
+
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/SherlockIdaSdk.cmake)
 
 # Layer 2 is a separate executable: the IDA SDK never enters the Sherlock binary's link line,

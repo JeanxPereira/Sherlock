@@ -31,6 +31,7 @@ sherlock_gate(DyldSharedCacheGates LINKS Sherlock::DyldSharedCache)
 sherlock_gate(MachOGates LINKS Sherlock::DyldSharedCache)
 sherlock_gate(FactsGates LINKS Sherlock::Facts)
 sherlock_gate(DocumentIndexGates LINKS Sherlock::DocumentIndex)
+sherlock_gate(HexRaysStoreGates LINKS Sherlock::HexRaysExport)
 
 # SealDump: not a gate itself (no Sherlock.SealDump ctest entry) -- the small driver
 # DocumentIndexParity.py runs over the whole Source/ tree, standing in for the CLI's own
