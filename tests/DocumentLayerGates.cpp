@@ -193,6 +193,80 @@ namespace
         Expect(!sawLeakedLine, "q never prints another address's citation or seal");
     }
 
+    // A "0" on cited-by/sealed-at is not always "nothing refers to this address": a Seal row with
+    // Address NULL means the extractor found a real tag but could not pair an address in its own
+    // segment (lint_seals.py's own "no-address", e.g. Source/DesignLibrary/LayerResolver.cpp:864 --
+    // 0x27c198c20's own real shape), and a Citation row with Address NULL means the section names
+    // its target by symbol only. Neither row's Address column can ever equal the queried address,
+    // so both "0"s here must carry the corpus's own count of that blind spot instead of reading as
+    // an absence (CLAUDE.md: "an instrument's zero is not an absence"). A dedicated Documents.db
+    // (not the shared fixture, whose exact section/citation/seal counts GateStatusWithDocuments
+    // depends on) carrying only this shape: one symbol-only citation, two no-address seals.
+    void GateQueryLayerBlindSpot(const Fixture& fixture)
+    {
+        const auto path = fixture.Root / "BlindSpotDocuments.db";
+        auto       db   = Store::Database::Open(path, Store::Database::Mode::ReadWrite);
+        Expect(db.has_value(), "the blind-spot fixture opens");
+        if (!db) return;
+        Expect(Store::CreateDocumentsStore(*db).has_value() && Store::CreateDocumentIndexes(*db).has_value(),
+               "the blind-spot fixture uses the production schema APIs");
+
+        auto section = db->Prepare(
+            "INSERT INTO Section(File, Number, Title, FirstLine, LastLine, Text) "
+            "VALUES('docs/re/blindspot.md', '1', 'LayerResolver', 1, 1, 'placeholder')");
+        Expect(section.has_value() && section->Step().has_value(), "the blind-spot fixture inserts one section");
+        const auto sectionId = db->LastInsertId();
+
+        auto citation = db->Prepare("INSERT INTO Citation(Section, Address, Symbol) VALUES(?1, NULL, ?2)");
+        Expect(citation.has_value(), "the blind-spot citation insert prepares");
+        if (citation)
+        {
+            Expect(citation->Bind(1, sectionId).has_value() &&
+                       citation->Bind(2, std::string_view("LayerResolver.compute")).has_value() &&
+                       citation->Step().has_value(),
+                   "the blind-spot fixture inserts one symbol-only citation");
+        }
+
+        for (int i = 0; i < 2; ++i)
+        {
+            auto seal = db->Prepare(
+                "INSERT INTO Seal(File, Line, Tag, Image, Symbol, Address) VALUES(?1, 864, 'BIN', ?2, NULL, NULL)");
+            Expect(seal.has_value(), "the blind-spot seal insert prepares");
+            if (seal)
+            {
+                Expect(seal->Bind(1, std::string_view("Source/DesignLibrary/LayerResolver.cpp")).has_value() &&
+                           seal->Bind(2, std::string_view("DesignLibrary")).has_value() && seal->Step().has_value(),
+                       "the blind-spot fixture inserts one no-address seal");
+            }
+        }
+
+        Fixture blindSpot   = fixture;
+        blindSpot.Documents = path;
+
+        std::vector<std::string> output;
+        Cli::PrintDocumentLayer(Environment(blindSpot, output, true), 0x27c198c20);
+        bool sawZeroCited = false, sawZeroSealed = false, sawCitedBlindSpot = false, sawSealedBlindSpot = false;
+        for (const auto& line : output)
+        {
+            if (line == "  cited by: 0") sawZeroCited = true;
+            if (line == "  sealed at: 0") sawZeroSealed = true;
+            if (line == "  cited by blind spot: 1 citation(s) in the tree carry no address this layer can "
+                        "pair -- the 0 above means none of THOSE match, not that nothing refers to this address")
+                sawCitedBlindSpot = true;
+            if (line == "  sealed at blind spot: 2 seal(s) in the tree carry no address this layer can pair "
+                        "-- the 0 above means none of THOSE match, not that nothing refers to this address")
+                sawSealedBlindSpot = true;
+        }
+        Expect(sawZeroCited, "cited by still reports 0 for an address no row's Address column matches");
+        Expect(sawZeroSealed, "sealed at still reports 0 for an address no row's Address column matches");
+        Expect(sawCitedBlindSpot,
+               "a 0 cited-by count states the corpus's own count of symbol-only citations it cannot "
+               "match by address, instead of reading as a silent absence");
+        Expect(sawSealedBlindSpot,
+               "a 0 sealed-at count states the corpus's own count of no-address seals it cannot pair -- "
+               "0x27c198c20's own real shape (LayerResolver.cpp:864) must never print a bare zero");
+    }
+
     void GateQueryLayerTruncation(const Fixture& fixture)
     {
         // A dedicated Documents.db (not the shared fixture) with 12 citations under one address --
@@ -516,6 +590,7 @@ int main()
     GateStatusWithoutDocuments(fixture);
     GateQueryLayerNotBuilt(fixture);
     GateQueryLayerCitedAndSealed(fixture);
+    GateQueryLayerBlindSpot(fixture);
     GateQueryLayerTruncation(fixture);
     GateSchemaMismatch(fixture);
     GateStatusWithDocuments(fixture);

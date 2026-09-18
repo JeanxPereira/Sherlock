@@ -172,6 +172,12 @@ endfunction()
 sherlock_documents_query_test(QueryCitedBy  q 0x27c198c20 MATCH "cited by.*resolvelayers-recon")
 sherlock_documents_query_test(QuerySealedAt q 0x22695fe48 MATCH "sealed at.*SnippetSizeConstants")
 
+# 0x27c198c20's OWN seal (Source/DesignLibrary/LayerResolver.cpp:864) sits BEFORE its own BIN
+# tag in the sentence, so it is permanently a no-address seal (tools/seals-baseline.txt:45) --
+# "sealed at" for this exact address is always 0, and that 0 must never print bare: the
+# blind-spot line must name a nonzero count of no-address seals the tree actually carries.
+sherlock_documents_query_test(QuerySealedAtBlindSpot q 0x27c198c20 MATCH "sealed at blind spot: [1-9][0-9]* seal")
+
 # The shader-seal control: WalkSource's inclusion rule (DocumentIndex::HasSealExtension) must carry
 # .frag/.vert/.glsl into Documents.db, or this seal -- real, decoded, cited by
 # 2026-09-17-siri-wave-archive-renderer-parity.md -- goes missing from the built store while

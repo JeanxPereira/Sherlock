@@ -408,20 +408,22 @@ namespace Sherlock::Cli
         // never print, and a mid-loop Step() error reads as plain end-of-rows, silently stopping
         // the count short of the real total -- both are the instrument reporting a fact ("N")
         // where it cannot actually look. This always prints the line, and prints NOT VERIFIED
-        // with the reason instead of a number when it cannot vouch for one (finding 3).
-        void EmitCountedRows(const QueryEnvironment& env, std::string_view label,
+        // with the reason instead of a number when it cannot vouch for one (finding 3). Returns
+        // the count it actually vouches for, nullopt on a NOT VERIFIED -- the caller's own signal
+        // for whether a "0" here is safe to annotate with EmitAddressBlindSpot below.
+        std::optional<std::size_t> EmitCountedRows(const QueryEnvironment& env, std::string_view label,
                             Foundation::Expected<Store::Statement> statement, std::uint64_t address,
                             const std::function<void(Store::Statement&)>& printRow)
         {
             if (!statement)
             {
                 Emit(env, std::format("  {}: NOT VERIFIED -- {}", label, statement.error().Format()));
-                return;
+                return std::nullopt;
             }
             if (auto bind = statement->Bind(1, static_cast<std::int64_t>(address)); !bind)
             {
                 Emit(env, std::format("  {}: NOT VERIFIED -- {}", label, bind.error().Format()));
-                return;
+                return std::nullopt;
             }
             std::size_t count = 0;
             for (;;)
@@ -430,7 +432,7 @@ namespace Sherlock::Cli
                 if (!row)
                 {
                     Emit(env, std::format("  {}: NOT VERIFIED after {} row(s) -- {}", label, count, row.error().Format()));
-                    return;
+                    return std::nullopt;
                 }
                 if (!*row)
                 {
@@ -443,6 +445,29 @@ namespace Sherlock::Cli
                 }
             }
             Emit(env, std::format("  {}: {}", label, count));
+            return count;
+        }
+
+        // `table`'s own corpus-wide count of rows this layer indexed but whose Address column is
+        // NULL -- an enumerable fact, not an estimate (Seal: SealExtractor.cpp's own "no-address"
+        // shape, e.g. Source/DesignLibrary/LayerResolver.cpp:864; Citation: a section naming its
+        // target by symbol only, CitationExtractor.cpp). A row of this shape is invisible to the
+        // `WHERE Address = ?` query above, so its "0" answers only "no ROW carries THIS address",
+        // never "nothing in the tree refers to it". Called only when that count came back 0; this
+        // is that zero's own blind spot, stated instead of left silent (CLAUDE.md: "an instrument's
+        // zero is not an absence").
+        void EmitAddressBlindSpot(const QueryEnvironment& env, Store::Database& documents, std::string_view table,
+                                  std::string_view label, std::string_view rowNoun)
+        {
+            auto blindSpot = documents.ScalarInt(std::format("SELECT COUNT(*) FROM {} WHERE Address IS NULL", table));
+            if (!blindSpot)
+            {
+                Emit(env, std::format("  {} blind spot: NOT VERIFIED -- {}", label, blindSpot.error().Format()));
+                return;
+            }
+            Emit(env, std::format("  {} blind spot: {} {} in the tree carry no address this layer can pair -- "
+                                  "the 0 above means none of THOSE match, not that nothing refers to this address",
+                                  label, *blindSpot, rowNoun));
         }
     }
 
@@ -459,9 +484,9 @@ namespace Sherlock::Cli
             EmitLayerThreeNotBuilt(env);
             return;
         }
-        auto& documents = opened.Database;
-        EmitCountedRows(env, "cited by",
-                       documents->Prepare("SELECT Section.File, Section.Number, Section.Title FROM Citation "
+        auto& documents = *opened.Database;
+        const auto citedCount = EmitCountedRows(env, "cited by",
+                       documents.Prepare("SELECT Section.File, Section.Number, Section.Title FROM Citation "
                                           "JOIN Section ON Section.Id = Citation.Section WHERE Citation.Address = ?1 "
                                           "ORDER BY Section.File, Section.FirstLine"),
                        address, [&env](Store::Statement& s) {
@@ -469,13 +494,21 @@ namespace Sherlock::Cli
                            PrintCitedBy(env, s.Text(0), numberIsNull, numberIsNull ? std::string_view{} : s.Text(1),
                                        s.Text(2));
                        });
-        EmitCountedRows(env, "sealed at",
-                       documents->Prepare("SELECT File, Line, Tag, Image FROM Seal WHERE Address = ?1 ORDER BY File, Line"),
+        if (citedCount && *citedCount == 0)
+        {
+            EmitAddressBlindSpot(env, documents, "Citation", "cited by", "citation(s)");
+        }
+        const auto sealedCount = EmitCountedRows(env, "sealed at",
+                       documents.Prepare("SELECT File, Line, Tag, Image FROM Seal WHERE Address = ?1 ORDER BY File, Line"),
                        address, [&env](Store::Statement& s) {
                            const bool imageIsNull = s.IsNull(3);
                            PrintSealedAt(env, s.Text(0), s.Int(1), s.Text(2), imageIsNull,
                                         imageIsNull ? std::string_view{} : s.Text(3));
                        });
+        if (sealedCount && *sealedCount == 0)
+        {
+            EmitAddressBlindSpot(env, documents, "Seal", "sealed at", "seal(s)");
+        }
     }
 
     Verdict RunQuery(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::string_view target)
