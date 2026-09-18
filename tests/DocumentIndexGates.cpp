@@ -5,6 +5,7 @@
 #include <DocumentIndex/CitationExtractor.h>
 #include <DocumentIndex/Heading.h>
 #include <DocumentIndex/LaudoSections.h>
+#include <DocumentIndex/SealExtractor.h>
 
 #include <algorithm>
 #include <fstream>
@@ -135,6 +136,58 @@ namespace
         Expect(!sawPathAsSymbol, "Assets/Icons.Bundle is excluded as a path, not a symbol");
         Expect(!sawBareWordAsSymbol, "a dotless backtick word is never mistaken for a dotted symbol");
     }
+
+    void TestSealExtraction()
+    {
+        auto seals = DocumentIndex::ExtractSeals(FixturePath("seal-sample.txt"),
+                                                 "tests/Sherlock/fixtures/seal-sample.txt");
+        Expect(seals.has_value(), "ExtractSeals reads the fixture");
+        const auto& rows = *seals;
+        ExpectEq(rows.size(), std::size_t(7),
+                "seven seals: the string-literal '[BIN]' is never scanned (no comment block backs it)");
+
+        ExpectEq(rows[0].Tag, "BIN", "first row is [BIN]");
+        ExpectEq(rows[0].Image.value_or(""), "AgentCanvasKit", "its image");
+        Expect(rows[0].Address.has_value() && *rows[0].Address == 0x22695fe48ull,
+              "the first address in the segment, matching the clean control");
+
+        ExpectEq(rows[1].Tag, "BIN", "second row is [BIN] DesignLibrary");
+        ExpectEq(rows[1].Image.value_or(""), "DesignLibrary", "its image");
+        Expect(!rows[1].Address.has_value(),
+              "no-address: 0x27c198c20 sits BEFORE the tag, matching tools/seals-baseline.txt's own verdict");
+
+        ExpectEq(rows[2].Tag, "KIT", "third row is a trailing-comment [KIT] seal");
+        Expect(!rows[2].Image.has_value(),
+              "lint_seals.py's BIN regex is the only one that captures an image -- [KIT] never gets one, "
+              "so the word right after the tag ('Figma') must not leak in as an Image");
+        Expect(!rows[2].Address.has_value(), "no hex in this seal's prose");
+
+        ExpectEq(rows[3].Tag, "API", "fourth row is [API]");
+        Expect(!rows[3].Image.has_value(), "[API] never captures an image either");
+        Expect(!rows[3].Address.has_value(), "[API] with genuinely no address stays no-address");
+
+        ExpectEq(rows[4].Tag, "OBS", "fifth row is [OBS]");
+        Expect(!rows[4].Address.has_value(),
+              "0x100002710 is ROOTFS-shaped (0x10...), not cache-shaped -- an address-looking hex "
+              "outside the cache range must never become an Address citation");
+
+        ExpectEq(rows[5].Tag, "BIN", "sixth row is the glued-continuation [BIN]");
+        ExpectEq(rows[5].Image.value_or(""), "GlueTest", "its image");
+        Expect(rows[5].Address.has_value() && *rows[5].Address == 0x18a000030ull,
+              "the address sits on the NEXT line, glued to this one only because the continuation "
+              "offset is measured on the line's trimmed text, not its raw (still-indented) one");
+
+        ExpectEq(rows[6].Tag, "BIN", "seventh row is a second glued-continuation [BIN]");
+        ExpectEq(rows[6].Image.value_or(""), "GlueTest2", "its image");
+        Expect(rows[6].Address.has_value() && *rows[6].Address == 0x18a000040ull,
+              "this continuation's trimmed offset is 5 (between 4 and 8) -- a gate whose threshold "
+              "check tolerates 8->4 without noticing must still catch this one");
+
+        for (const auto& row : rows)
+        {
+            Expect(!row.Symbol.has_value(), "Seal.Symbol stays null in phase 2 (decision 5)");
+        }
+    }
 }
 
 int main()
@@ -143,5 +196,6 @@ int main()
     TestSplitDocumentLaudo();
     TestSplitDocumentConcept();
     TestCitationExtraction();
+    TestSealExtraction();
     return Finish();
 }

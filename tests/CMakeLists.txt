@@ -32,6 +32,17 @@ sherlock_gate(MachOGates LINKS Sherlock::DyldSharedCache)
 sherlock_gate(FactsGates LINKS Sherlock::Facts)
 sherlock_gate(DocumentIndexGates LINKS Sherlock::DocumentIndex)
 
+# SealDump: not a gate itself (no Sherlock.SealDump ctest entry) -- the small driver
+# DocumentIndexParity.py runs over the whole Source/ tree, standing in for the CLI's own
+# "build docs" until Task 6 lands (see DocumentIndexParity.py's own header for the deviation).
+add_executable(SherlockSealDump ${CMAKE_CURRENT_LIST_DIR}/SealDump.cpp)
+target_link_libraries(SherlockSealDump PRIVATE Sherlock::DocumentIndex)
+sherlock_compile_options(SherlockSealDump)
+
+add_test(NAME Sherlock.DocumentIndexParity
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/DocumentIndexParity.py
+                --dump $<TARGET_FILE:SherlockSealDump> --repo ${SHERLOCK_REPO})
+
 sherlock_gate(CliGates LINKS Sherlock::Facts)
 target_sources(SherlockTestCliGates PRIVATE
     ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Arguments.cpp

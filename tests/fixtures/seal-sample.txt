@@ -1,0 +1,19 @@
+        // [BIN] AgentCanvasKit cornerRadiusIsland getter @ 0x22695fe48; initializer @ 0x22695fcf4.
+        int example = 0;
+
+        // The order is `MP::LayerOrder`'s (@0x27c198c20, [BIN] DesignLibrary)
+        // -- the same one Apple enumerates them in.
+
+        int other = 1; // [KIT] Figma layer "shadow/outer" spacing 8
+
+        const char* fake = "[BIN] NotASeal @ 0x22695fe48";
+
+        // [API] no address here at all, just prose.
+
+        // [OBS] gate A/B temporary marker @ 0x100002710 (rootfs-shaped, not cache-shaped)
+
+            // [BIN] GlueTest tag only, address follows below
+            x; // @ 0x18a000030 glued address
+
+            // [BIN] GlueTest2 also tag only, address follows below
+            abc; // @ 0x18a000040 second glued address
