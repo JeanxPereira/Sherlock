@@ -226,6 +226,45 @@ namespace
         std::filesystem::remove_all(root, cleanupError);
     }
 
+    void TestBuildDocumentsRefusesDirectoryAsDatabasePath()
+    {
+        const auto root = std::filesystem::temp_directory_path() / "SherlockBuilderDirectoryGate";
+        const auto documents = root / "out" / "Documents.db";
+        std::error_code cleanupError;
+        std::filesystem::remove_all(root, cleanupError);
+        std::filesystem::create_directories(documents);
+        const auto report = DocumentIndex::BuildDocuments(root, documents);
+        Expect(!report.has_value(), "BuildDocuments refuses a directory passed as --documents");
+        Expect(std::filesystem::is_directory(documents), "BuildDocuments leaves a --documents directory intact");
+        std::filesystem::remove_all(root, cleanupError);
+    }
+
+    void TestBuildDocumentsRollsBackSchemaAfterInputFailure()
+    {
+        const auto root = std::filesystem::temp_directory_path() / "SherlockBuilderRollbackGate";
+        const auto documents = root / "out" / "Documents.db";
+        std::error_code cleanupError;
+        std::filesystem::remove_all(root, cleanupError);
+        std::filesystem::create_directories(root / "docs" / "concepts");
+        {
+            std::ofstream invalid(root / "docs" / "concepts" / "invalid.md", std::ios::binary);
+            invalid << "---\ntitle: missing closing front matter\n";
+        }
+        const auto report = DocumentIndex::BuildDocuments(root, documents);
+        Expect(!report.has_value(), "a malformed indexed document fails the build");
+        auto db = Store::Database::Open(documents, Store::Database::Mode::ReadOnly);
+        if (db)
+        {
+            const auto schema = Store::CheckDocumentsSchema(*db);
+            Expect(!schema.has_value(), "a failed build leaves no valid Documents schema or metadata");
+        }
+        else
+        {
+            Expect(true, "a failed build leaves no readable Documents database");
+        }
+        std::filesystem::remove_all(root, cleanupError);
+    }
+
     void TestSplitDocumentConcept()
     {
         auto sections =
@@ -341,6 +380,8 @@ int main()
     TestSplitDocumentConcept();
     TestReadCurrentHead();
     TestBuildDocumentsWritesCoverageFilesAndMeta();
+    TestBuildDocumentsRefusesDirectoryAsDatabasePath();
+    TestBuildDocumentsRollsBackSchemaAfterInputFailure();
     TestCitationExtraction();
     TestSealExtraction();
     return Finish();

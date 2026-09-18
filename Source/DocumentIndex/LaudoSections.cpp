@@ -26,6 +26,11 @@ namespace Sherlock::DocumentIndex
             }
             std::ostringstream buffer;
             buffer << stream.rdbuf();
+            if (!stream.eof() && stream.fail())
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, "SplitDocument", file.string(),
+                            "the file cannot be read completely", "check it is readable");
+            }
             return buffer.str();
         }
 

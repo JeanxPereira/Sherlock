@@ -164,6 +164,22 @@ namespace Sherlock::DocumentIndex
         Foundation::Expected<void> RemoveDatabaseFile(const std::filesystem::path& path)
         {
             std::error_code error;
+            const bool exists = std::filesystem::exists(path, error);
+            if (error)
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", path.string(),
+                            "the database path cannot be inspected", "check the output path");
+            }
+            if (exists && std::filesystem::is_directory(path, error))
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", path.string(),
+                            "a database path is an existing directory", "pass a database file path");
+            }
+            if (error)
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", path.string(),
+                            "the database path cannot be inspected", "check the output path");
+            }
             std::filesystem::remove(path, error);
             if (error)
             {
@@ -225,9 +241,9 @@ namespace Sherlock::DocumentIndex
         }
         auto database = Store::Database::Open(documentsPath, Store::Database::Mode::ReadWrite);
         if (!database) return std::unexpected(database.error());
-        if (auto ok = Store::CreateDocumentsStore(*database); !ok) return std::unexpected(ok.error());
         auto transaction = Store::Transaction::Begin(*database);
         if (!transaction) return std::unexpected(transaction.error());
+        if (auto ok = Store::CreateDocumentsStore(*database); !ok) return std::unexpected(ok.error());
 
         auto insertSection = database->Prepare("INSERT INTO Section(File, Number, Title, FirstLine, LastLine, Text) VALUES(?1, ?2, ?3, ?4, ?5, ?6)");
         auto insertCitation = database->Prepare("INSERT INTO Citation(Section, Address, Symbol) VALUES(?1, ?2, ?3)");

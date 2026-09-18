@@ -86,6 +86,7 @@ namespace Sherlock::Cli
         std::vector<std::string> args(argv + 1, argv + argc);
 
         Invocation invocation;
+        bool documentsExplicit = false;
         if (args[0] == "--version")
         {
             invocation.Command = "version";
@@ -109,10 +110,7 @@ namespace Sherlock::Cli
         if (const char* env = std::getenv("SHERLOCK_DOCUMENTS"); env != nullptr)
         {
             invocation.Documents = env;
-        }
-        else if (!invocation.Repo.empty())
-        {
-            invocation.Documents = invocation.Repo / "build" / "Sherlock" / "Documents.db";
+            documentsExplicit = true;
         }
         invocation.Towers = DefaultTowersPath();
 
@@ -151,6 +149,7 @@ namespace Sherlock::Cli
                 const auto v = next();
                 if (!v) return std::unexpected(v.error());
                 invocation.Documents = *v;
+                documentsExplicit = true;
             }
             else if (arg == "--towers")
             {
@@ -213,6 +212,10 @@ namespace Sherlock::Cli
             {
                 invocation.Positional.push_back(arg);
             }
+        }
+        if (!documentsExplicit && !invocation.Repo.empty())
+        {
+            invocation.Documents = invocation.Repo / "build" / "Sherlock" / "Documents.db";
         }
         return invocation;
     }
