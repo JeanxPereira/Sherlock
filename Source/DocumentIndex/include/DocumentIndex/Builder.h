@@ -28,4 +28,13 @@ namespace Sherlock::DocumentIndex
     // The post-increment seam lets the gate prove an iterator advance failure never becomes end-of-range.
     Foundation::Expected<std::vector<std::filesystem::path>> WalkSourceForTesting(
         const std::filesystem::path& root, std::function<Foundation::Expected<void>()> afterIncrement);
+
+    // The rule BuildDocuments uses to decide whether a markdown file under docs/re or
+    // docs/concepts enters the corpus -- exported so a second walk (the CLI's staleness scan)
+    // shares this exact rule instead of a second one that drifts from it.
+    bool IsIndexedMarkdown(const std::filesystem::path& path);
+
+    // The markdown counterpart of WalkSourceForTesting: lists the files BuildDocuments would
+    // index under one directory (non-recursive, matching WalkMarkdown), for the same reason.
+    Foundation::Expected<std::vector<std::filesystem::path>> WalkMarkdownForCli(const std::filesystem::path& dir);
 }

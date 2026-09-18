@@ -45,9 +45,7 @@ namespace Sherlock::DocumentIndex
             }
             while (iterator != end)
             {
-                const auto name = iterator->path().filename().string();
-                if (iterator->is_regular_file(error) && !error && iterator->path().extension() == ".md" &&
-                    name != "README.md" && name != "index.md")
+                if (iterator->is_regular_file(error) && !error && IsIndexedMarkdown(iterator->path()))
                 {
                     files.push_back(iterator->path());
                 }
@@ -203,6 +201,60 @@ namespace Sherlock::DocumentIndex
             return std::filesystem::relative(file, root).generic_string();
         }
 
+        // Removes a temp build's leftovers unconditionally at scope exit -- a no-op once
+        // PublishDocuments has moved them to their final path, so it only ever cleans up a build
+        // that returns early on a failure (decision: build-to-temp-then-publish, finding 7).
+        struct TempDatabaseCleanup
+        {
+            std::filesystem::path TempPath;
+            ~TempDatabaseCleanup()
+            {
+                std::error_code error;
+                for (const std::string_view suffix : {"", "-wal", "-shm"})
+                {
+                    std::filesystem::remove(std::filesystem::path(TempPath.string() + std::string(suffix)), error);
+                }
+            }
+        };
+
+        // Publishes a fully-built temp store over the final path in one rename per file, only
+        // after the temp build commits -- any earlier failure leaves documentsPath exactly as it
+        // is (finding 7: a half-built store must never replace a good one).
+        Foundation::Expected<void> PublishDocuments(const std::filesystem::path& tempPath,
+                                                    const std::filesystem::path& finalPath)
+        {
+            for (const std::string_view suffix : {"", "-wal", "-shm"})
+            {
+                const std::filesystem::path from(tempPath.string() + std::string(suffix));
+                const std::filesystem::path to(finalPath.string() + std::string(suffix));
+                std::error_code existsError;
+                const bool fromExists = std::filesystem::exists(from, existsError);
+                if (existsError)
+                {
+                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", from.string(),
+                                "the built documents database cannot be inspected before publishing",
+                                "check the output path");
+                }
+                if (!fromExists)
+                {
+                    continue;
+                }
+                if (auto ok = RemoveDatabaseFile(to); !ok)
+                {
+                    return ok;
+                }
+                std::error_code renameError;
+                std::filesystem::rename(from, to, renameError);
+                if (renameError)
+                {
+                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", from.string(),
+                                "the built documents database cannot be published to its final path",
+                                "check the output path", renameError.message());
+                }
+            }
+            return {};
+        }
+
         void AppendConceptCitations(std::vector<Citation>& citations, std::string_view text)
         {
             const auto frontMatter = ParseFrontMatter(text);
@@ -238,12 +290,29 @@ namespace Sherlock::DocumentIndex
         return WalkSource(root, afterIncrement);
     }
 
+    bool IsIndexedMarkdown(const std::filesystem::path& path)
+    {
+        if (path.extension() != ".md")
+        {
+            return false;
+        }
+        const auto name = path.filename().string();
+        return name != "README.md" && name != "index.md";
+    }
+
+    Foundation::Expected<std::vector<std::filesystem::path>> WalkMarkdownForCli(const std::filesystem::path& dir)
+    {
+        return WalkMarkdown(dir);
+    }
+
     Foundation::Expected<DocumentsBuildReport> BuildDocuments(const std::filesystem::path& repoRoot,
                                                               const std::filesystem::path& documentsPath)
     {
         const auto start = std::chrono::steady_clock::now();
-        for (const auto& path : {documentsPath, std::filesystem::path(documentsPath.string() + "-wal"),
-                                 std::filesystem::path(documentsPath.string() + "-shm")})
+        const std::filesystem::path tempPath(documentsPath.string() + ".tmp");
+        TempDatabaseCleanup cleanup{tempPath};
+        for (const auto& path : {tempPath, std::filesystem::path(tempPath.string() + "-wal"),
+                                 std::filesystem::path(tempPath.string() + "-shm")})
         {
             if (auto ok = RemoveDatabaseFile(path); !ok) return std::unexpected(ok.error());
         }
@@ -254,7 +323,13 @@ namespace Sherlock::DocumentIndex
             return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", documentsPath.parent_path().string(),
                         "the documents database directory cannot be created", "check the output path");
         }
-        auto database = Store::Database::Open(documentsPath, Store::Database::Mode::ReadWrite);
+
+        DocumentsBuildReport report;
+        // Everything that touches tempPath's connection lives in this block, so the connection
+        // (and any WAL/SHM it opened) closes before PublishDocuments renames the file underneath
+        // it -- Windows refuses to rename a file a live handle still holds open (finding 7).
+        {
+        auto database = Store::Database::Open(tempPath, Store::Database::Mode::ReadWrite);
         if (!database) return std::unexpected(database.error());
         auto transaction = Store::Transaction::Begin(*database);
         if (!transaction) return std::unexpected(transaction.error());
@@ -269,7 +344,6 @@ namespace Sherlock::DocumentIndex
         if (!insertSeal) return std::unexpected(insertSeal.error());
         if (!insertFile) return std::unexpected(insertFile.error());
 
-        DocumentsBuildReport report;
         const auto indexMarkdown = [&](const std::filesystem::path& root, bool isConcept)
             -> Foundation::Expected<std::pair<std::uint64_t, std::uint64_t>> {
             auto files = WalkMarkdown(root);
@@ -359,6 +433,9 @@ namespace Sherlock::DocumentIndex
         if (auto ok = WriteCoverage(*database, "docs/concepts", report.ConceptFilesRead, report.ConceptFilesTotal); !ok) return std::unexpected(ok.error());
         if (auto ok = WriteCoverage(*database, "Source", report.SourceFilesRead, report.SourceFilesTotal); !ok) return std::unexpected(ok.error());
         if (auto ok = transaction->Commit(); !ok) return std::unexpected(ok.error());
+        } // database and transaction close here, before the temp file is published
+
+        if (auto ok = PublishDocuments(tempPath, documentsPath); !ok) return std::unexpected(ok.error());
         report.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         return report;
     }
