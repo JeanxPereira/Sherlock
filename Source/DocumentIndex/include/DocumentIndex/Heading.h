@@ -18,8 +18,9 @@ namespace Sherlock::DocumentIndex
         std::string                Title;      // the text after the number, or the whole heading text
     };
 
-    // A line inside a fenced code block (``` or ~~~, closed by its own opening marker) is never a
-    // heading, however many '#' it starts with -- illustrating a heading inside a code sample must
-    // not split the document, and the measured corpus has 132 such lines (docs/re + docs/concepts).
+    // A line inside a fenced code block (``` or ~~~, closed only by a line whose run is the SAME
+    // character and at least as long as the opening one) is never a heading, however many '#' it
+    // starts with. Neither is a line indented 4 or more columns (CommonMark: a leading tab
+    // expands to the next multiple of four) -- an indented code line, not an ATX heading.
     std::vector<Heading> ParseHeadings(std::string_view markdown);
 }

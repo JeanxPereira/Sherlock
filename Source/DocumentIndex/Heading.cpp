@@ -42,6 +42,84 @@ namespace Sherlock::DocumentIndex
             return text.substr(i);
         }
 
+        // CommonMark: a leading tab expands to the next multiple of four columns. A line whose
+        // leading whitespace reaches column 4 is an indented code line, never a heading, however
+        // many '#' characters follow it.
+        std::size_t LeadingIndentWidth(std::string_view line)
+        {
+            std::size_t column = 0;
+            for (const char ch : line)
+            {
+                if (ch == ' ')
+                {
+                    ++column;
+                }
+                else if (ch == '\t')
+                {
+                    column = (column / 4 + 1) * 4;
+                }
+                else
+                {
+                    break;
+                }
+            }
+            return column;
+        }
+
+        struct FenceMarker
+        {
+            char        Char   = '\0';
+            std::size_t Length = 0;
+        };
+
+        // A fence opens on a run of three or more of the same character, backtick or tilde.
+        std::optional<FenceMarker> ParseFenceOpen(std::string_view trimmed)
+        {
+            if (trimmed.empty() || (trimmed[0] != '`' && trimmed[0] != '~'))
+            {
+                return std::nullopt;
+            }
+            const char  marker = trimmed[0];
+            std::size_t length = 0;
+            while (length < trimmed.size() && trimmed[length] == marker)
+            {
+                ++length;
+            }
+            if (length < 3)
+            {
+                return std::nullopt;
+            }
+            return FenceMarker{marker, length};
+        }
+
+        // A fence closes on a line whose run is the SAME character as the opening one, at least
+        // as long, with nothing but whitespace after it. A shorter run, or one of the other
+        // fence character, is content -- it stays inside the fence.
+        bool ClosesFence(std::string_view trimmed, const FenceMarker& opening)
+        {
+            if (trimmed.empty() || trimmed[0] != opening.Char)
+            {
+                return false;
+            }
+            std::size_t length = 0;
+            while (length < trimmed.size() && trimmed[length] == opening.Char)
+            {
+                ++length;
+            }
+            if (length < opening.Length)
+            {
+                return false;
+            }
+            for (std::size_t i = length; i < trimmed.size(); ++i)
+            {
+                if (trimmed[i] != ' ' && trimmed[i] != '\t')
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         // '§' is UTF-8 0xC2 0xA7; std::regex's ECMAScript grammar accepts the \xHH hex escape.
         // Covers every numbered form measured in docs/re: "§5." (bare), "§10 Title" (no period,
         // more text follows), "5.1 Title" (no '§'). A form outside this (e.g. "§9b.") does not
@@ -58,24 +136,31 @@ namespace Sherlock::DocumentIndex
     {
         std::vector<Heading> headings;
         const auto            lines = SplitLines(markdown);
-        bool                   inFence     = false;
-        std::string_view       fenceMarker;
+        bool                   inFence = false;
+        FenceMarker            fence;
         for (std::size_t i = 0; i < lines.size(); ++i)
         {
             const auto trimmed = TrimLeft(lines[i]);
-            if (!inFence && (trimmed.starts_with("```") || trimmed.starts_with("~~~")))
+            if (!inFence)
             {
-                inFence     = true;
-                fenceMarker = trimmed.substr(0, 3);
-                continue;
+                if (const auto opened = ParseFenceOpen(trimmed))
+                {
+                    inFence = true;
+                    fence   = *opened;
+                    continue;
+                }
             }
-            if (inFence)
+            else
             {
-                if (trimmed.starts_with(fenceMarker))
+                if (ClosesFence(trimmed, fence))
                 {
                     inFence = false;
                 }
                 continue;
+            }
+            if (LeadingIndentWidth(lines[i]) >= 4)
+            {
+                continue; // an indented code line (CommonMark), never a heading
             }
             std::size_t level = 0;
             while (level < trimmed.size() && trimmed[level] == '#')

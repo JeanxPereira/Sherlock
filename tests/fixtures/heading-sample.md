@@ -27,3 +27,15 @@ More prose.
 ## Why this framework
 
 # §9b. The VERTICAL axis closed: `Alignment.center`
+
+    #### Indented heading that must not split (4 spaces)
+
+	### Tab-indented heading, also code
+
+````text
+line of text
+```
+## Heading shaped line still inside the outer fence
+````
+
+## Heading after the fence, definitely real

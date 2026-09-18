@@ -5,6 +5,7 @@ Each version states what it adds and the measurement behind every performance cl
 ## Unreleased
 
 - DocumentIndex: fence-aware markdown heading parser (`Heading`, `ParseHeadings`) -- the first piece layer 3 needs to turn a laudo into addressable sections.
+- DocumentIndex: `Heading` enforces CommonMark's two ATX-heading rules a naive `#`-scan misses -- a fence closes only on a line whose run is the SAME character and at least as long as the opening one (a shorter inner run of the same character stays content), and a line indented 4 or more columns is code, never a heading. Corrects the `docs/re` heading count measured for the phase-2 plan: 2 719 -> 2 713 with the fence-skip in place, 2 898 -> 2 860 with it removed (the mutation in Task 9 Step 5).
 
 ## 0.1.0
 
