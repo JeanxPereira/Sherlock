@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace Sherlock::Cli
 {
@@ -70,7 +71,18 @@ namespace Sherlock::Cli
             if (auto ok = statement->Bind(1, relativeFile); !ok) return std::unexpected(ok.error());
             const auto row = statement->Step();
             if (!row) return std::unexpected(row.error());
-            if (!*row) return false;
+            if (!*row)
+            {
+                // Every Section a build writes has a matching File row for its own source file
+                // (Builder.cpp writes File before Section, for every indexed document) -- a
+                // Section with none is Documents.db missing its own bookkeeping, not a fresh
+                // file. Reporting "false" (fresh) here fed laudo's byte-exact promise from a
+                // "could not look" (finding 4); this is the same fact, refused instead of guessed.
+                return Foundation::Fail(Foundation::DiagnosticCode::Mismatch, Foundation::Severity::NotVerified,
+                                        "IsStale", std::string(relativeFile),
+                                        "this section's own File row is missing from Documents.db",
+                                        "rebuild it with Sherlock build docs");
+            }
             const auto current = DocumentIndex::StatFile(repo / std::string(relativeFile));
             return !current || current->Size != static_cast<std::uintmax_t>(statement->Int(0)) ||
                    current->MTime != statement->Int(1);
@@ -133,11 +145,57 @@ namespace Sherlock::Cli
             return std::all_of(text.begin(), text.end(), [](unsigned char c) { return std::isdigit(c) || c == '.'; });
         }
 
+        // A string under 3 significant characters cannot produce a single trigram, so
+        // SectionFtsText's MATCH is guaranteed to answer EMPTY, whatever the corpus holds --
+        // that is the instrument's floor, not a fact about the corpus, and find must refuse it
+        // as NOT VERIFIED rather than report a silent, always-true "not in the corpus" (finding 6).
+        bool BelowTrigramFloor(std::string_view text)
+        {
+            std::size_t significant = 0;
+            for (const unsigned char c : text)
+            {
+                if (c == '"' || std::isspace(c)) continue;
+                ++significant;
+                if (significant >= 3) return false;
+            }
+            return true;
+        }
+
         struct SectionHit
         {
             std::string Text;
             std::string File;
         };
+
+        // laudo matches a slug by path suffix across every indexed root, so a basename present
+        // under both docs/re and docs/concepts would otherwise splice two documents into one
+        // outline and stat only the first for staleness. No such collision exists in the corpus
+        // today, but a query that could silently pick either file is a hole, not a feature --
+        // this makes the ambiguity a refusal instead of an arbitrary pick (finding 8).
+        Foundation::Expected<void> CheckSlugUnambiguous(Store::Database& db, std::string_view suffix)
+        {
+            auto statement = db.Prepare("SELECT DISTINCT File FROM Section WHERE substr(File, -length(?1)) = ?1 "
+                                        "ORDER BY File LIMIT 2");
+            if (!statement) return std::unexpected(statement.error());
+            if (auto ok = statement->Bind(1, suffix); !ok) return std::unexpected(ok.error());
+            std::vector<std::string> files;
+            for (;;)
+            {
+                const auto row = statement->Step();
+                if (!row) return std::unexpected(row.error());
+                if (!*row) break;
+                files.emplace_back(statement->Text(0));
+            }
+            if (files.size() > 1)
+            {
+                return Foundation::Fail(Foundation::DiagnosticCode::Mismatch, Foundation::Severity::NotVerified,
+                                        "RunLaudo", std::string(suffix),
+                                        std::format("this slug matches more than one file, at least {} and {}",
+                                                    files[0], files[1]),
+                                        "pass more of the path to disambiguate, or rename one of the two documents");
+            }
+            return {};
+        }
 
         Foundation::Expected<std::optional<SectionHit>> FindSection(Store::Database& db, std::string_view suffix,
                                                                       std::string_view section, bool numeric,
@@ -167,6 +225,13 @@ namespace Sherlock::Cli
         if (!db) return {VerdictKind::NotVerified, 0, db.error().Format(), 0, 0};
         const auto coverage = DocumentsCoverage(*db);
         if (!coverage) return {VerdictKind::NotVerified, 0, coverage.error().Format(), 0, 0};
+        if (BelowTrigramFloor(text))
+        {
+            return {VerdictKind::NotVerified, 0,
+                    std::format("'{}' has fewer than 3 significant characters -- the trigram index cannot answer it",
+                                text),
+                    coverage->first, coverage->second};
+        }
         auto statement = db->Prepare(
             "SELECT Section.File, Section.Number, Section.Title, "
             "snippet(SectionFtsText, 0, '>>>', '<<<', ' ... ', 24) "
@@ -209,6 +274,11 @@ namespace Sherlock::Cli
         const auto coverage = DocumentsCoverage(*db);
         if (!coverage) return {VerdictKind::NotVerified, 0, coverage.error().Format(), 0, 0};
         const std::string suffix = "/" + std::string(slug) + ".md";
+
+        if (auto unambiguous = CheckSlugUnambiguous(*db, suffix); !unambiguous)
+        {
+            return {VerdictKind::NotVerified, 0, unambiguous.error().Format(), coverage->first, coverage->second};
+        }
 
         if (section.empty())
         {
