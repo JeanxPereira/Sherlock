@@ -1,10 +1,11 @@
 // Sherlock — tools/Sherlock/Source/SherlockCli/Main.cpp
-// Entry point: --version, `build facts`, and the query commands (q, callers, calls, refs, status).
+// Entry point: --version, `build facts`, and the facts and documents query commands.
 #include <DyldSharedCache/Cache.h>
 #include <DocumentIndex/Builder.h>
 #include <Facts/Builder.h>
 #include <SherlockCli/Arguments.h>
 #include <SherlockCli/Demangler.h>
+#include <SherlockCli/Documents.h>
 #include <SherlockCli/Queries.h>
 #include <SherlockCli/Towers.h>
 
@@ -217,9 +218,10 @@ int main(int argc, char** argv)
         return RunBuildDocs(*invocation);
     }
 
-    const bool queryCommand = invocation->Command == "q" || invocation->Command == "callers" ||
-                              invocation->Command == "calls" || invocation->Command == "refs";
-    if ((queryCommand || invocation->Command == "status") && invocation->Store.empty())
+    const bool factsQuery = invocation->Command == "q" || invocation->Command == "callers" ||
+                            invocation->Command == "calls" || invocation->Command == "refs";
+    const bool documentsQuery = invocation->Command == "find" || invocation->Command == "laudo";
+    if ((factsQuery || invocation->Command == "status") && invocation->Store.empty())
     {
         PrintVerdict({Cli::VerdictKind::NotVerified, 0, "no store path; pass --store or set SHERLOCK_STORE", 0, 0},
                      invocation->Json);
@@ -232,14 +234,15 @@ int main(int argc, char** argv)
                      invocation->Json);
         return 2;
     }
-    if (queryCommand && invocation->Positional.empty())
+    if (factsQuery && invocation->Positional.empty())
     {
         PrintVerdict({Cli::VerdictKind::NotVerified, 0, "no address or symbol given", 0, 0}, invocation->Json);
         return 2;
     }
 
     std::vector<std::string> output;
-    Cli::QueryEnvironment env{invocation->Store, invocation->Full, invocation->Json, &output};
+    Cli::QueryEnvironment env{invocation->Store, invocation->Documents, invocation->Repo, invocation->Full,
+                              invocation->Json, &output};
     const auto printHeader = [&]() {
         const auto header = Cli::PrintHeader(env, "");
         if (header)
@@ -264,8 +267,23 @@ int main(int argc, char** argv)
         PrintVerdict(verdict, invocation->Json, output);
         return Cli::ExitCode(verdict);
     }
-    if (invocation->Command == "q" || invocation->Command == "callers" || invocation->Command == "calls" ||
-        invocation->Command == "refs")
+    if (documentsQuery)
+    {
+        if (invocation->Positional.empty())
+        {
+            PrintVerdict({Cli::VerdictKind::NotVerified, 0,
+                          invocation->Command == "find" ? "no search text given" : "no laudo slug given", 0, 0},
+                         invocation->Json, output);
+            return 2;
+        }
+        const auto verdict = invocation->Command == "find"
+            ? Cli::RunFind(env, invocation->Positional.front())
+            : Cli::RunLaudo(env, invocation->Positional.front(),
+                            invocation->Positional.size() > 1 ? std::string_view(invocation->Positional[1]) : "");
+        PrintVerdict(verdict, invocation->Json, output);
+        return Cli::ExitCode(verdict);
+    }
+    if (factsQuery)
     {
         if (!printHeader())
         {

@@ -17,6 +17,8 @@ namespace Sherlock::Cli
     struct QueryEnvironment
     {
         std::filesystem::path Store;
+        std::filesystem::path Documents;
+        std::filesystem::path Repo;
         bool                  Full = false;
         bool                  Json = false;
         std::vector<std::string>* Output = nullptr;
