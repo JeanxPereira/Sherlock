@@ -30,6 +30,18 @@ sherlock_gate(StoreGates LINKS Sherlock::Store)
 sherlock_gate(DyldSharedCacheGates LINKS Sherlock::DyldSharedCache)
 sherlock_gate(MachOGates LINKS Sherlock::DyldSharedCache)
 sherlock_gate(FactsGates LINKS Sherlock::Facts)
+sherlock_gate(DocumentIndexGates LINKS Sherlock::DocumentIndex)
+
+# SealDump: not a gate itself (no Sherlock.SealDump ctest entry) -- the small driver
+# DocumentIndexParity.py runs over the whole Source/ tree, standing in for the CLI's own
+# "build docs" until Task 6 lands (see DocumentIndexParity.py's own header for the deviation).
+add_executable(SherlockSealDump ${CMAKE_CURRENT_LIST_DIR}/SealDump.cpp)
+target_link_libraries(SherlockSealDump PRIVATE Sherlock::DocumentIndex)
+sherlock_compile_options(SherlockSealDump)
+
+add_test(NAME Sherlock.DocumentIndexParity
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/DocumentIndexParity.py
+                --dump $<TARGET_FILE:SherlockSealDump> --repo ${SHERLOCK_REPO})
 
 sherlock_gate(CliGates LINKS Sherlock::Facts)
 target_sources(SherlockTestCliGates PRIVATE
@@ -38,6 +50,21 @@ target_sources(SherlockTestCliGates PRIVATE
     ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Demangler.cpp)
 target_include_directories(SherlockTestCliGates PRIVATE ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/include)
 target_link_libraries(SherlockTestCliGates PRIVATE nlohmann_json::nlohmann_json)
+
+sherlock_gate(DocumentsGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::DyldSharedCache)
+target_sources(SherlockTestDocumentsGates PRIVATE
+    ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Documents.cpp)
+target_include_directories(SherlockTestDocumentsGates PRIVATE
+    ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/include)
+
+add_executable(SherlockDocumentsFixture ${CMAKE_CURRENT_LIST_DIR}/DocumentsFixture.cpp)
+target_link_libraries(SherlockDocumentsFixture PRIVATE Sherlock::Store)
+sherlock_compile_options(SherlockDocumentsFixture)
+
+add_test(NAME Sherlock.LaudoExactOutputGate
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/LaudoExactOutputGate.py
+                $<TARGET_FILE:Sherlock> $<TARGET_FILE:SherlockDocumentsFixture>
+                ${CMAKE_CURRENT_BINARY_DIR}/LaudoExactOutputScratch)
 
 # Sherlock.BuildTowers fills the real store once; every query test below requires it and none rebuilds it.
 add_test(NAME Sherlock.BuildTowers
@@ -94,3 +121,100 @@ add_test(NAME Sherlock.ParityGates
 add_test(NAME Sherlock.FinalFixGates
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/FinalFixGates.py
                 $<TARGET_FILE:Sherlock> ${CMAKE_CURRENT_BINARY_DIR}/FinalFixGateScratch)
+
+# q's two layer-3 blocks (cited by / sealed at) and status's layer-3 line (task 8). The behavior
+# itself is covered corpus-free by DocumentLayerGates below; these ctest entries additionally
+# prove it end to end against the real corpus's own positive controls.
+sherlock_gate(DocumentLayerGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::DyldSharedCache)
+target_sources(SherlockTestDocumentLayerGates PRIVATE
+    ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Queries.cpp)
+target_include_directories(SherlockTestDocumentLayerGates PRIVATE
+    ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/include)
+
+set(SHERLOCK_DOCUMENTS_CORPUS ${CMAKE_CURRENT_BINARY_DIR}/SherlockDocumentsCorpus/Documents.db)
+
+# Pure markdown/source parsing over the real repository -- no cache or Facts store needed, so
+# this is cheap (a few seconds) even though every other query test below depends on it.
+add_test(NAME Sherlock.BuildDocuments
+        COMMAND $<TARGET_FILE:Sherlock> build docs --repo ${SHERLOCK_REPO} --documents ${SHERLOCK_DOCUMENTS_CORPUS})
+set_tests_properties(Sherlock.BuildDocuments PROPERTIES FIXTURES_SETUP SherlockDocuments TIMEOUT 120)
+
+# Measured 2026-09-18 by `python tests/Sherlock/measure_document_counts.py <repo root>` -- a
+# corpus fact, not a code fact: re-run that command and update these three numbers by hand
+# whenever docs/re, docs/concepts or Source/'s seals grow or shrink enough to move them.
+# BIN_SEALS moved 2144 -> 2207 in this same measurement: WalkSource (and measure_document_counts.py's
+# own walk) now carry the shader extensions (.frag/.vert/.glsl) that SealDump and lint_seals.py
+# already scanned -- the built store was missing every shader seal until this fix.
+set(SHERLOCK_DOCUMENTS_RE_SECTIONS 2713)
+set(SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS 209)
+set(SHERLOCK_DOCUMENTS_BIN_SEALS 2207)
+
+add_test(NAME Sherlock.DocumentsExactCounts
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/DocumentsExactCounts.py
+                ${SHERLOCK_DOCUMENTS_CORPUS}
+                ${SHERLOCK_DOCUMENTS_RE_SECTIONS} ${SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS}
+                ${SHERLOCK_DOCUMENTS_BIN_SEALS})
+set_tests_properties(Sherlock.DocumentsExactCounts PROPERTIES FIXTURES_REQUIRED SherlockDocuments)
+
+function(sherlock_documents_query_test name)
+    cmake_parse_arguments(ARG "" "MATCH" "" ${ARGN})
+    add_test(NAME Sherlock.${name} COMMAND $<TARGET_FILE:Sherlock> ${ARG_UNPARSED_ARGUMENTS}
+            --cache ${SHERLOCK_CACHE_DIR} --store ${SHERLOCK_STORE_DIR} --documents ${SHERLOCK_DOCUMENTS_CORPUS})
+    set_tests_properties(Sherlock.${name} PROPERTIES
+        FIXTURES_REQUIRED "SherlockStore;SherlockDocuments"
+        PASS_REGULAR_EXPRESSION "${ARG_MATCH}")
+endfunction()
+
+# The Measured Facts table's own positive controls: the DesignLibrary 13-layer table's citations,
+# and the SnippetSizeConstants.h clean BIN-tagged seal. Named like the existing Query* tests, so --
+# like them -- excluded from a run that skips the slow real-corpus facts build (`-E "...|Query|..."`);
+# verified directly against the built binary instead (see this task's report).
+sherlock_documents_query_test(QueryCitedBy  q 0x27c198c20 MATCH "cited by.*resolvelayers-recon")
+sherlock_documents_query_test(QuerySealedAt q 0x22695fe48 MATCH "sealed at.*SnippetSizeConstants")
+
+# 0x27c198c20's OWN seal (Source/DesignLibrary/LayerResolver.cpp:864) sits BEFORE its own BIN
+# tag in the sentence, so it is permanently a no-address seal (tools/seals-baseline.txt:45) --
+# "sealed at" for this exact address is always 0, and that 0 must never print bare: the
+# blind-spot line must name a nonzero count of no-address seals the tree actually carries.
+sherlock_documents_query_test(QuerySealedAtBlindSpot q 0x27c198c20 MATCH "sealed at blind spot: [1-9][0-9]* seal")
+
+# The shader-seal control: WalkSource's inclusion rule (DocumentIndex::HasSealExtension) must carry
+# .frag/.vert/.glsl into Documents.db, or this seal -- real, decoded, cited by
+# 2026-09-17-siri-wave-archive-renderer-parity.md -- goes missing from the built store while
+# SealDump/DocumentIndexParity.py, which walk the same files directly, keep passing. That is
+# exactly the drift this gate exists to catch: narrow WalkSource's extension list back to
+# .h/.hpp/.cpp and this FAILS with no "sealed at" line for 0x24058bd88 at all.
+sherlock_documents_query_test(QuerySealedAtShader q 0x24058bd88 MATCH "sealed at Source/DesignLibrary/shaders/SiriEffect.frag:4")
+
+# find and laudo themselves, against the same real corpus -- QueryCitedBy/QuerySealedAt above
+# prove q's layer-3 lines; these prove the commands Task 7 exists for.
+sherlock_documents_query_test(LaudoOutline   laudo 2026-08-22-resolvelayers-recon  MATCH "7.*LayerResolver")
+sherlock_documents_query_test(LaudoSection   laudo 2026-08-22-resolvelayers-recon §7 MATCH "0x27c198c20")
+sherlock_documents_query_test(FindShadowPool find "shadow pool"                    MATCH "systembanner-geometria")
+
+# laudo's own staleness gate (decision 8): a self-contained scratch repo, built and mutated
+# with the real Sherlock.exe -- not the SherlockDocuments fixture above, since it needs to edit
+# a file's content and mtime AFTER the build and observe the CLI itself refuse the stale text.
+add_test(NAME Sherlock.LaudoStalenessGate
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/LaudoStalenessGate.py
+                $<TARGET_FILE:Sherlock> ${CMAKE_CURRENT_BINARY_DIR}/LaudoStalenessScratch)
+
+# Deliberately does NOT require SherlockDocuments, and points --documents at a path that is
+# guaranteed never to exist -- proving decision 4's fallback cannot depend on ctest's run order
+# relative to Sherlock.BuildDocuments, which writes to a fixed, shared path other tests also read.
+add_test(NAME Sherlock.QueryNoDocuments
+        COMMAND $<TARGET_FILE:Sherlock> q 0x240622d98 --cache ${SHERLOCK_CACHE_DIR} --store ${SHERLOCK_STORE_DIR}
+                --documents ${CMAKE_CURRENT_BINARY_DIR}/SherlockDocumentsCorpus/DoesNotExist.db)
+set_tests_properties(Sherlock.QueryNoDocuments PROPERTIES
+        FIXTURES_REQUIRED SherlockStore
+        PASS_REGULAR_EXPRESSION "layer 3: not built")
+
+# status's layer 3, over the real, already-built Facts store and Documents.db. No "Query" in the
+# name, so -- unlike the two tests above -- this DOES run in the reduced ctest pass: it reads the
+# Facts Catalog.db Sherlock.BuildTowers produced once (every session shares that persisted store;
+# this never rebuilds it), so it needs no facts-store fixture of its own.
+add_test(NAME Sherlock.StatusLayerThree
+        COMMAND $<TARGET_FILE:Sherlock> status --store ${SHERLOCK_STORE_DIR} --documents ${SHERLOCK_DOCUMENTS_CORPUS})
+set_tests_properties(Sherlock.StatusLayerThree PROPERTIES
+        FIXTURES_REQUIRED SherlockDocuments
+        PASS_REGULAR_EXPRESSION "changed: [0-9]+, added: [0-9]+, removed: [0-9]+")

@@ -18,7 +18,7 @@ namespace Sherlock::Cli
     {
         std::string                  Command;
         std::vector<std::string>     Positional;
-        std::filesystem::path        Cache, Store, Towers;
+        std::filesystem::path        Cache, Store, Towers, Documents, Repo;
         std::vector<std::string>     Images;
         bool                         AllTowers = false;
         bool                         Full      = false;

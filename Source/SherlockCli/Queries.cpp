@@ -2,14 +2,19 @@
 // Per-image-store SQL behind every subcommand, routed through DyldSharedCache::Cache::Owner.
 #include <SherlockCli/Queries.h>
 
+#include <DocumentIndex/Builder.h>
+#include <DocumentIndex/FileStamp.h>
 #include <Store/Database.h>
 #include <Store/Schema.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <functional>
 #include <optional>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Sherlock::Cli
@@ -128,6 +133,28 @@ namespace Sherlock::Cli
         {
             if (env.Output != nullptr) env.Output->push_back(line);
             if (!env.Json) std::printf("%s\n", line.c_str());
+        }
+
+        // The exact `Sherlock build docs` invocation that would populate Documents.db from this
+        // environment's own already-resolved --repo/--documents (Arguments.cpp's default,
+        // <repo>/build/Sherlock/Documents.db, when --documents was never explicit). Documents.db
+        // stays worktree-relative on purpose (the phase-2 plan's own "it follows the worktree"
+        // decision: layer 3 is derived from THIS working tree, not from the shared corpus store),
+        // so the fix here is not a cleverer default -- it is naming the one command that builds it,
+        // instead of an agent spending calls hunting for a path (finding 1).
+        std::string BuildDocsCommand(const QueryEnvironment& env)
+        {
+            const std::string repoArg = env.Repo.empty() ? std::string("<repo>") : env.Repo.string();
+            const std::filesystem::path fallbackDocuments =
+                env.Repo.empty() ? std::filesystem::path("<repo>/build/Sherlock/Documents.db")
+                                 : env.Repo / "build" / "Sherlock" / "Documents.db";
+            const std::string docsArg = env.Documents.empty() ? fallbackDocuments.string() : env.Documents.string();
+            return std::format("Sherlock build docs --repo {} --documents {}", repoArg, docsArg);
+        }
+
+        void EmitLayerThreeNotBuilt(const QueryEnvironment& env)
+        {
+            Emit(env, std::format("layer 3: not built -- build it with: {}", BuildDocsCommand(env)));
         }
 
         void PrintCallLine(const QueryEnvironment& env, const std::string& imageBasename, std::int64_t site,
@@ -283,6 +310,207 @@ namespace Sherlock::Cli
         }
     }
 
+    namespace
+    {
+        // Absent (no error, nullopt) when Documents.db genuinely is not there or carries another
+        // tool version's schema -- layer 3 is optional coverage, never a reason to fail q's or
+        // status's layer-1/2 answer (decision 4). Unreadable (an error) when the path exists but
+        // could not be opened -- corrupt, locked, permission denied -- which is a fact the
+        // instrument could not establish and must never be folded into "not built" (finding 4).
+        // Documents.cpp keeps its own OpenDocuments private, so this is its own small copy,
+        // matching this codebase's existing preference for a local static over a shared header.
+        struct DocumentsOrNone
+        {
+            std::optional<Store::Database> Database;
+            std::optional<std::string>     UnreadableReason;
+        };
+
+        DocumentsOrNone OpenDocumentsOrNone(const QueryEnvironment& env)
+        {
+            if (env.Documents.empty())
+            {
+                return {};
+            }
+            std::error_code error;
+            const bool      exists = std::filesystem::exists(env.Documents, error);
+            if (error)
+            {
+                return {std::nullopt, error.message()};
+            }
+            if (!exists)
+            {
+                return {};
+            }
+            auto db = Store::Database::Open(env.Documents, Store::Database::Mode::ReadOnly);
+            if (!db)
+            {
+                return {std::nullopt, db.error().Format()};
+            }
+            if (auto ok = Store::CheckDocumentsSchema(*db); !ok)
+            {
+                // CheckDocumentsSchema's own Mismatch means the file opened and reads fine, it
+                // just carries a Kind/SchemaVersion this build does not expect -- decision 4's
+                // "not built". Any other code (Database/Io) means the read that would answer
+                // that question itself failed -- SQLite could not even get past the page header
+                // (corrupt bytes, wrong format, a sharing violation) -- an honestly different
+                // fact than "absent" (finding 4).
+                if (ok.error().Code == Foundation::DiagnosticCode::Mismatch)
+                {
+                    return {};
+                }
+                return {std::nullopt, ok.error().Format()};
+            }
+            return {std::move(*db), std::nullopt};
+        }
+
+        std::int64_t ScalarOrZero(Store::Database& db, std::string_view sql)
+        {
+            auto value = db.ScalarInt(sql);
+            return value ? *value : 0;
+        }
+
+        std::pair<std::uint64_t, std::uint64_t> DocumentsCoverage(Store::Database& db)
+        {
+            auto statement = db.Prepare("SELECT COALESCE(SUM(Read), 0), COALESCE(SUM(Total), 0) FROM Coverage");
+            if (!statement)
+            {
+                return {0, 0};
+            }
+            const auto row = statement->Step();
+            if (!row || !*row)
+            {
+                return {0, 0};
+            }
+            return {static_cast<std::uint64_t>(statement->Int(0)), static_cast<std::uint64_t>(statement->Int(1))};
+        }
+
+        void PrintCitedBy(const QueryEnvironment& env, std::string_view file, bool numberIsNull,
+                          std::string_view number, std::string_view title)
+        {
+            if (numberIsNull || number.empty())
+            {
+                Emit(env, std::format("  cited by {} \xE2\x80\x94 {}", Basename(file), title));
+            }
+            else
+            {
+                Emit(env, std::format("  cited by {} \xC2\xA7{} \xE2\x80\x94 {}", Basename(file), number, title));
+            }
+        }
+
+        void PrintSealedAt(const QueryEnvironment& env, std::string_view file, std::int64_t line, std::string_view tag,
+                           bool imageIsNull, std::string_view image)
+        {
+            Emit(env, std::format("  sealed at {}:{} [{}] {}", file, line, tag,
+                                  imageIsNull ? std::string_view("(no image)") : image));
+        }
+
+        // A prepare/bind failure here would otherwise make the whole "cited by"/"sealed at" line
+        // never print, and a mid-loop Step() error reads as plain end-of-rows, silently stopping
+        // the count short of the real total -- both are the instrument reporting a fact ("N")
+        // where it cannot actually look. This always prints the line, and prints NOT VERIFIED
+        // with the reason instead of a number when it cannot vouch for one (finding 3). Returns
+        // the count it actually vouches for, nullopt on a NOT VERIFIED -- the caller's own signal
+        // for whether a "0" here is safe to annotate with EmitAddressBlindSpot below.
+        std::optional<std::size_t> EmitCountedRows(const QueryEnvironment& env, std::string_view label,
+                            Foundation::Expected<Store::Statement> statement, std::uint64_t address,
+                            const std::function<void(Store::Statement&)>& printRow)
+        {
+            if (!statement)
+            {
+                Emit(env, std::format("  {}: NOT VERIFIED -- {}", label, statement.error().Format()));
+                return std::nullopt;
+            }
+            if (auto bind = statement->Bind(1, static_cast<std::int64_t>(address)); !bind)
+            {
+                Emit(env, std::format("  {}: NOT VERIFIED -- {}", label, bind.error().Format()));
+                return std::nullopt;
+            }
+            std::size_t count = 0;
+            for (;;)
+            {
+                const auto row = statement->Step();
+                if (!row)
+                {
+                    Emit(env, std::format("  {}: NOT VERIFIED after {} row(s) -- {}", label, count, row.error().Format()));
+                    return std::nullopt;
+                }
+                if (!*row)
+                {
+                    break;
+                }
+                ++count;
+                if (env.Full || count <= 10)
+                {
+                    printRow(*statement);
+                }
+            }
+            Emit(env, std::format("  {}: {}", label, count));
+            return count;
+        }
+
+        // `table`'s own corpus-wide count of rows this layer indexed but whose Address column is
+        // NULL -- an enumerable fact, not an estimate (Seal: SealExtractor.cpp's own "no-address"
+        // shape, e.g. Source/DesignLibrary/LayerResolver.cpp:864; Citation: a section naming its
+        // target by symbol only, CitationExtractor.cpp). A row of this shape is invisible to the
+        // `WHERE Address = ?` query above, so its "0" answers only "no ROW carries THIS address",
+        // never "nothing in the tree refers to it". Called only when that count came back 0; this
+        // is that zero's own blind spot, stated instead of left silent (CLAUDE.md: "an instrument's
+        // zero is not an absence").
+        void EmitAddressBlindSpot(const QueryEnvironment& env, Store::Database& documents, std::string_view table,
+                                  std::string_view label, std::string_view rowNoun)
+        {
+            auto blindSpot = documents.ScalarInt(std::format("SELECT COUNT(*) FROM {} WHERE Address IS NULL", table));
+            if (!blindSpot)
+            {
+                Emit(env, std::format("  {} blind spot: NOT VERIFIED -- {}", label, blindSpot.error().Format()));
+                return;
+            }
+            Emit(env, std::format("  {} blind spot: {} {} in the tree carry no address this layer can pair -- "
+                                  "the 0 above means none of THOSE match, not that nothing refers to this address",
+                                  label, *blindSpot, rowNoun));
+        }
+    }
+
+    void PrintDocumentLayer(const QueryEnvironment& env, std::uint64_t address)
+    {
+        auto opened = OpenDocumentsOrNone(env);
+        if (opened.UnreadableReason)
+        {
+            Emit(env, std::format("layer 3: NOT VERIFIED -- {}", *opened.UnreadableReason));
+            return;
+        }
+        if (!opened.Database)
+        {
+            EmitLayerThreeNotBuilt(env);
+            return;
+        }
+        auto& documents = *opened.Database;
+        const auto citedCount = EmitCountedRows(env, "cited by",
+                       documents.Prepare("SELECT Section.File, Section.Number, Section.Title FROM Citation "
+                                          "JOIN Section ON Section.Id = Citation.Section WHERE Citation.Address = ?1 "
+                                          "ORDER BY Section.File, Section.FirstLine"),
+                       address, [&env](Store::Statement& s) {
+                           const bool numberIsNull = s.IsNull(1);
+                           PrintCitedBy(env, s.Text(0), numberIsNull, numberIsNull ? std::string_view{} : s.Text(1),
+                                       s.Text(2));
+                       });
+        if (citedCount && *citedCount == 0)
+        {
+            EmitAddressBlindSpot(env, documents, "Citation", "cited by", "citation(s)");
+        }
+        const auto sealedCount = EmitCountedRows(env, "sealed at",
+                       documents.Prepare("SELECT File, Line, Tag, Image FROM Seal WHERE Address = ?1 ORDER BY File, Line"),
+                       address, [&env](Store::Statement& s) {
+                           const bool imageIsNull = s.IsNull(3);
+                           PrintSealedAt(env, s.Text(0), s.Int(1), s.Text(2), imageIsNull,
+                                        imageIsNull ? std::string_view{} : s.Text(3));
+                       });
+        if (sealedCount && *sealedCount == 0)
+        {
+            EmitAddressBlindSpot(env, documents, "Seal", "sealed at", "seal(s)");
+        }
+    }
+
     Verdict RunQuery(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::string_view target)
     {
         auto catalog = Store::Database::Open(env.Store / "Catalog.db", Store::Database::Mode::ReadOnly);
@@ -348,6 +576,12 @@ namespace Sherlock::Cli
         {
             return {VerdictKind::NotVerified, 0, std::format("0x{:x} is not mapped", *address), 0, 0};
         }
+
+        // Layer 3 answers "what does the corpus's prose say about this address" -- independent
+        // of whether layer 1/2 ever built the owning image or resolved a function at it, so it
+        // runs here, as soon as the address itself is concrete and mapped (decision 4).
+        PrintDocumentLayer(env, *address);
+
         const auto owned = Resolve(cache, *rows, *address);
         if (!owned)
         {
@@ -696,7 +930,104 @@ namespace Sherlock::Cli
             return {VerdictKind::NotVerified, 0, diskError.message(), read, total};
         Emit(env, std::format("disk: {} bytes", diskBytes));
         Emit(env, "layer 2: not built");
-        Emit(env, "layer 3: not built");
+
+        auto opened = OpenDocumentsOrNone(env);
+        if (opened.UnreadableReason)
+        {
+            Emit(env, std::format("layer 3: NOT VERIFIED -- {}", *opened.UnreadableReason));
+        }
+        else if (!opened.Database)
+        {
+            EmitLayerThreeNotBuilt(env);
+        }
+        else
+        {
+            auto&      documents          = *opened.Database;
+            const auto sections            = ScalarOrZero(documents, "SELECT COUNT(*) FROM Section");
+            const auto citations           = ScalarOrZero(documents, "SELECT COUNT(*) FROM Citation");
+            const auto seals               = ScalarOrZero(documents, "SELECT COUNT(*) FROM Seal");
+            const auto [docRead, docTotal] = DocumentsCoverage(documents);
+            Emit(env, std::format("layer 3: {} section(s), {} citation(s), {} seal(s), coverage {}/{} file(s)",
+                                  sections, citations, seals, docRead, docTotal));
+            if (auto head = Store::ReadMeta(documents, "Head"))
+            {
+                Emit(env, std::format("head: {} (information only -- the check below is per file, not per commit)",
+                                      *head));
+            }
+
+            // The one place this layer pays the full cost: a stat() per indexed file (cheap,
+            // no content read) plus a walk for files the store has no row for at all -- this is
+            // what catches an uncommitted in-place edit, which changes neither HEAD nor the total
+            // file count (decision 8). The walk itself reuses BuildDocuments's own inclusion
+            // rule (DocumentIndex::IsIndexedMarkdown, DocumentIndex::WalkSourceForTesting) instead
+            // of a second, hand-rolled one -- two rules for "is this file in the corpus" drift
+            // apart the day one of them changes, and a stale README.md/index.md exclusion is
+            // exactly how "added" ends up permanently nonzero (finding 1). A failure here (a
+            // SQLite error mid-scan, or a directory walk the filesystem refuses) is a fact the
+            // instrument could not establish and must surface as NOT VERIFIED, never as a
+            // reassuring zero (finding 2).
+            std::size_t                        changed = 0, removed = 0, added = 0;
+            std::set<std::string, std::less<>> known;
+            std::optional<std::string>         scanError;
+            auto files = documents.Prepare("SELECT Path, Size, MTime FROM File");
+            if (!files)
+            {
+                scanError = files.error().Format();
+            }
+            else
+            {
+                for (;;)
+                {
+                    const auto row = files->Step();
+                    if (!row)
+                    {
+                        scanError = row.error().Format();
+                        break;
+                    }
+                    if (!*row) break;
+                    const std::string path(files->Text(0));
+                    known.insert(path);
+                    const auto current = DocumentIndex::StatFile(env.Repo / path);
+                    if (!current)
+                    {
+                        ++removed;
+                    }
+                    else if (current->Size != static_cast<std::uintmax_t>(files->Int(1)) ||
+                            current->MTime != files->Int(2))
+                    {
+                        ++changed;
+                    }
+                }
+            }
+            const auto countNew = [&](Foundation::Expected<std::vector<std::filesystem::path>> found) {
+                if (scanError) return;
+                if (!found)
+                {
+                    scanError = found.error().Format();
+                    return;
+                }
+                for (const auto& file : *found)
+                {
+                    const auto rel = std::filesystem::relative(file, env.Repo).generic_string();
+                    if (!known.contains(rel))
+                    {
+                        ++added;
+                    }
+                }
+            };
+            if (!scanError) countNew(DocumentIndex::WalkMarkdownForCli(env.Repo / "docs" / "re"));
+            if (!scanError) countNew(DocumentIndex::WalkMarkdownForCli(env.Repo / "docs" / "concepts"));
+            if (!scanError) countNew(DocumentIndex::WalkSourceForTesting(env.Repo / "Source", {}));
+
+            if (scanError)
+            {
+                return {VerdictKind::NotVerified, done,
+                        std::format("layer 3 staleness scan could not finish: {}", *scanError), read, total};
+            }
+            Emit(env, std::format("changed: {}, added: {}, removed: {} (since this store was built)", changed, added,
+                                  removed));
+        }
+
         return {VerdictKind::Found, done, {}, read, total};
     }
 }

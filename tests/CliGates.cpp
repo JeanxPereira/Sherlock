@@ -38,6 +38,28 @@ namespace
             }
         }
         {
+            const char* argv[] = {"Sherlock", "build", "docs", "--repo", "C:/repo", "--documents", "C:/out/Documents.db"};
+            const auto invocation = Cli::ParseArguments(7, const_cast<char**>(argv));
+            Expect(invocation.has_value(), "build docs with explicit repository and documents paths parses");
+            if (invocation)
+            {
+                Expect(invocation->Positional.size() == 1 && invocation->Positional.front() == "docs",
+                       "build docs stays positional");
+                ExpectEq(invocation->Repo.generic_string(), std::string("C:/repo"), "Repo");
+                ExpectEq(invocation->Documents.generic_string(), std::string("C:/out/Documents.db"), "Documents");
+            }
+        }
+        {
+            const char* argv[] = {"Sherlock", "build", "docs", "--repo", "C:/other"};
+            const auto invocation = Cli::ParseArguments(5, const_cast<char**>(argv));
+            Expect(invocation.has_value(), "build docs --repo parses without an explicit documents path");
+            if (invocation)
+            {
+                ExpectEq(invocation->Documents.generic_string(), std::string("C:/other/build/Sherlock/Documents.db"),
+                         "--repo derives the default documents path after argument parsing");
+            }
+        }
+        {
             const char*     argv[] = {"Sherlock", "refs", "0x29f60f388", "--to", "0x29f60f480"};
             const auto invocation = Cli::ParseArguments(5, const_cast<char**>(argv));
             Expect(invocation.has_value(), "refs <addr> --to <addr> parses");
