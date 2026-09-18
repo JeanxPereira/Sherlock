@@ -27,3 +27,10 @@ CMake fills both from `References/scripts/target.py --paths`.
     .\build\tools\Sherlock\Debug\Sherlock.exe callers 0x2230edebc
     .\build\tools\Sherlock\Debug\Sherlock.exe refs 0x29f60f388 --to 0x29f60f480
     .\build\tools\Sherlock\Debug\Sherlock.exe status
+
+Layer 3 (`q`'s "cited by"/"sealed at", `status`'s section/citation/seal counts, `find`, `laudo`)
+comes from `Documents.db`, which nothing builds automatically -- run
+`Sherlock build docs --repo <repo>` once (a few seconds, no corpus needed) when `q`/`status`
+report `layer 3: not built`; that line itself prints the exact command, including the
+`--documents` path it resolved (`<repo>/build/Sherlock/Documents.db` by default, worktree-relative
+on purpose, so a different clone or worktree gets its own).

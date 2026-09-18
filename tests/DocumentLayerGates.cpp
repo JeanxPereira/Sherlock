@@ -131,13 +131,16 @@ namespace
         std::vector<std::string> output;
         const auto                verdict = Cli::RunStatus(Environment(fixture, output, false));
         Expect(verdict.Kind == Cli::VerdictKind::Found, "status still answers when Documents.db is absent");
-        bool sawNotBuilt = false, sawSectionCount = false;
+        bool sawNotBuilt = false, sawBuildCommand = false, sawSectionCount = false;
         for (const auto& line : output)
         {
-            if (line == "layer 3: not built") sawNotBuilt = true;
+            if (line.starts_with("layer 3: not built")) sawNotBuilt = true;
+            if (line.find("Sherlock build docs --repo") != std::string::npos) sawBuildCommand = true;
             if (line.find("section(s)") != std::string::npos) sawSectionCount = true;
         }
         Expect(sawNotBuilt, "status reports layer 3 as not built when Documents.db is absent");
+        Expect(sawBuildCommand,
+               "status's not-built line names the exact command that builds layer 3, not just the fact");
         Expect(!sawSectionCount, "status never fabricates a section count when Documents.db is absent");
     }
 
@@ -145,8 +148,11 @@ namespace
     {
         std::vector<std::string> output;
         Cli::PrintDocumentLayer(Environment(fixture, output, false), 0x27c198c20);
-        Expect(output.size() == 1 && output.front() == "layer 3: not built",
+        Expect(output.size() == 1 && output.front().starts_with("layer 3: not built"),
                "q's layer 3 block prints exactly one line when Documents.db is absent, nothing else");
+        Expect(!output.empty() && output.front().find("Sherlock build docs --repo") != std::string::npos,
+               "q's not-built line names the exact command that builds layer 3 -- a message that "
+               "names the fix instead of an agent hunting for a Documents.db path");
     }
 
     void GateQueryLayerCitedAndSealed(const Fixture& fixture)
@@ -253,7 +259,7 @@ namespace
 
         std::vector<std::string> output;
         Cli::PrintDocumentLayer(Environment(corrupt, output, true), 0x27c198c20);
-        Expect(output.size() == 1 && output.front() == "layer 3: not built",
+        Expect(output.size() == 1 && output.front().starts_with("layer 3: not built"),
                "q refuses a Documents.db with the wrong schema version instead of reading it");
 
         std::vector<std::string> statusOutput;
@@ -261,7 +267,7 @@ namespace
         bool sawNotBuilt = false, sawSectionCount = false;
         for (const auto& line : statusOutput)
         {
-            if (line == "layer 3: not built") sawNotBuilt = true;
+            if (line.starts_with("layer 3: not built")) sawNotBuilt = true;
             if (line.find("section(s)") != std::string::npos) sawSectionCount = true;
         }
         Expect(verdict.Kind == Cli::VerdictKind::Found, "status still answers when Documents.db has the wrong schema");

@@ -135,6 +135,28 @@ namespace Sherlock::Cli
             if (!env.Json) std::printf("%s\n", line.c_str());
         }
 
+        // The exact `Sherlock build docs` invocation that would populate Documents.db from this
+        // environment's own already-resolved --repo/--documents (Arguments.cpp's default,
+        // <repo>/build/Sherlock/Documents.db, when --documents was never explicit). Documents.db
+        // stays worktree-relative on purpose (the phase-2 plan's own "it follows the worktree"
+        // decision: layer 3 is derived from THIS working tree, not from the shared corpus store),
+        // so the fix here is not a cleverer default -- it is naming the one command that builds it,
+        // instead of an agent spending calls hunting for a path (finding 1).
+        std::string BuildDocsCommand(const QueryEnvironment& env)
+        {
+            const std::string repoArg = env.Repo.empty() ? std::string("<repo>") : env.Repo.string();
+            const std::filesystem::path fallbackDocuments =
+                env.Repo.empty() ? std::filesystem::path("<repo>/build/Sherlock/Documents.db")
+                                 : env.Repo / "build" / "Sherlock" / "Documents.db";
+            const std::string docsArg = env.Documents.empty() ? fallbackDocuments.string() : env.Documents.string();
+            return std::format("Sherlock build docs --repo {} --documents {}", repoArg, docsArg);
+        }
+
+        void EmitLayerThreeNotBuilt(const QueryEnvironment& env)
+        {
+            Emit(env, std::format("layer 3: not built -- build it with: {}", BuildDocsCommand(env)));
+        }
+
         void PrintCallLine(const QueryEnvironment& env, const std::string& imageBasename, std::int64_t site,
                            std::int64_t caller,
                            std::string_view via, bool islandIsNull, std::int64_t island)
@@ -434,7 +456,7 @@ namespace Sherlock::Cli
         }
         if (!opened.Database)
         {
-            Emit(env, "layer 3: not built");
+            EmitLayerThreeNotBuilt(env);
             return;
         }
         auto& documents = opened.Database;
@@ -883,7 +905,7 @@ namespace Sherlock::Cli
         }
         else if (!opened.Database)
         {
-            Emit(env, "layer 3: not built");
+            EmitLayerThreeNotBuilt(env);
         }
         else
         {
