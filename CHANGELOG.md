@@ -6,6 +6,7 @@ Each version states what it adds and the measurement behind every performance cl
 
 - DocumentIndex: fence-aware markdown heading parser (`Heading`, `ParseHeadings`) -- the first piece layer 3 needs to turn a laudo into addressable sections.
 - DocumentIndex: `Heading` enforces CommonMark's two ATX-heading rules a naive `#`-scan misses -- a fence closes only on a line whose run is the SAME character and at least as long as the opening one (a shorter inner run of the same character stays content), and a line indented 4 or more columns is code, never a heading. Corrects the `docs/re` heading count measured for the phase-2 plan: 2 719 -> 2 713 with the fence-skip in place, 2 898 -> 2 860 with it removed (the mutation in Task 9 Step 5).
+- `Sherlock.DocumentsExactCounts`: pins the whole-corpus `Section`/`Seal` totals, measured by `tests/Sherlock/measure_document_counts.py` on the current tree -- `docs/re` 2 713 sections, `docs/concepts` 209 sections, `Source/` 981 `[BIN]` seals. `Sherlock build docs` over the whole repository reports `2922 section(s), ..., 1008 seal(s)`: 2 922 = 2 713 + 209, and 1 008 = 981 `[BIN]` + 27 of the `KIT`/`OBS`/`API` tags combined (11 `API`, 15 `KIT`, 1 `OBS`).
 
 ## 0.1.0
 

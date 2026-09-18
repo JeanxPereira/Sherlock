@@ -139,6 +139,20 @@ add_test(NAME Sherlock.BuildDocuments
         COMMAND $<TARGET_FILE:Sherlock> build docs --repo ${SHERLOCK_REPO} --documents ${SHERLOCK_DOCUMENTS_CORPUS})
 set_tests_properties(Sherlock.BuildDocuments PROPERTIES FIXTURES_SETUP SherlockDocuments TIMEOUT 120)
 
+# Measured 2026-09-18 by `python tests/Sherlock/measure_document_counts.py <repo root>` -- a
+# corpus fact, not a code fact: re-run that command and update these three numbers by hand
+# whenever docs/re, docs/concepts or Source/'s seals grow or shrink enough to move them.
+set(SHERLOCK_DOCUMENTS_RE_SECTIONS 2713)
+set(SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS 209)
+set(SHERLOCK_DOCUMENTS_BIN_SEALS 981)
+
+add_test(NAME Sherlock.DocumentsExactCounts
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/DocumentsExactCounts.py
+                ${SHERLOCK_DOCUMENTS_CORPUS}
+                ${SHERLOCK_DOCUMENTS_RE_SECTIONS} ${SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS}
+                ${SHERLOCK_DOCUMENTS_BIN_SEALS})
+set_tests_properties(Sherlock.DocumentsExactCounts PROPERTIES FIXTURES_REQUIRED SherlockDocuments)
+
 function(sherlock_documents_query_test name)
     cmake_parse_arguments(ARG "" "MATCH" "" ${ARGN})
     add_test(NAME Sherlock.${name} COMMAND $<TARGET_FILE:Sherlock> ${ARG_UNPARSED_ARGUMENTS}
