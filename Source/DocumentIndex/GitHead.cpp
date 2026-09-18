@@ -21,21 +21,41 @@ namespace Sherlock::DocumentIndex
                 return Fail(DiagnosticCode::Io, Severity::NotVerified, "ReadCurrentHead", path.string(),
                             "the file cannot be opened", "check the repository's git metadata");
             }
-            std::ostringstream buffer;
-            buffer << stream.rdbuf();
-            if (!stream.eof() && stream.fail())
+            return ReadGitText(stream, path.string());
+        }
+    }
+
+    Foundation::Expected<std::string> ReadGitText(std::istream& stream, std::string_view diagnosticSubject)
+    {
+        std::string text;
+        try
+        {
+            for (;;)
             {
-                return Fail(DiagnosticCode::Io, Severity::NotVerified, "ReadCurrentHead", path.string(),
-                            "the file cannot be read", "check the repository's git metadata");
+                const auto character = stream.get();
+                if (character == std::char_traits<char>::eof()) break;
+                text.push_back(static_cast<char>(character));
             }
-            auto text = buffer.str();
+        }
+        catch (const std::ios_base::failure&)
+        {
+            return Fail(DiagnosticCode::Io, Severity::NotVerified, "ReadCurrentHead", std::string(diagnosticSubject),
+                        "the file cannot be read", "check the repository's git metadata");
+        }
+        if (!stream.eof() || stream.bad())
+        {
+            return Fail(DiagnosticCode::Io, Severity::NotVerified, "ReadCurrentHead", std::string(diagnosticSubject),
+                        "the file cannot be read", "check the repository's git metadata");
+        }
             while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
             {
                 text.pop_back();
             }
             return text;
-        }
+    }
 
+    namespace
+    {
         Foundation::Expected<std::filesystem::path> GitDirectory(const std::filesystem::path& repoRoot)
         {
             const auto dotGit = repoRoot / ".git";

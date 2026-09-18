@@ -173,6 +173,19 @@ namespace
                "laudo refuses a Documents.db with the wrong schema version");
         std::filesystem::remove_all(fixture.Root);
     }
+
+    void GatePlainLaudoOutputFailure(const Fixture& fixture)
+    {
+        std::vector<std::string> output;
+        auto env = Environment(fixture, output, false);
+        env.PlainTextSink = [](std::string_view) {
+            return Foundation::Fail(Foundation::DiagnosticCode::Io, Foundation::Severity::NotVerified,
+                                    "PlainTextSink", "stdout", "injected output failure", "retry the command");
+        };
+        const auto verdict = Cli::RunLaudo(env, "sample", "7");
+        Expect(verdict.Kind == Cli::VerdictKind::NotVerified && output.empty(),
+               "laudo reports a plain output failure without returning a successful payload");
+    }
 }
 
 int main()
@@ -180,6 +193,7 @@ int main()
     const auto fixture = CreateFixture();
     GateLaudoByteExactAndJsonParity(fixture);
     GateCaseInsensitiveTitleAndNoFactsStore(fixture);
+    GatePlainLaudoOutputFailure(fixture);
     GateStalenessAndSqliteFailures(fixture);
     GateDocumentsSchemaRefusal();
     std::filesystem::remove_all(fixture.Root);

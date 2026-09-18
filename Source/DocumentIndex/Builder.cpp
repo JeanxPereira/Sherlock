@@ -43,13 +43,8 @@ namespace Sherlock::DocumentIndex
                 return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
                             "the directory cannot be read", "check the repository layout");
             }
-            for (; iterator != end; iterator.increment(error))
+            while (iterator != end)
             {
-                if (error)
-                {
-                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
-                                "the directory cannot be walked", "check the repository layout");
-                }
                 const auto name = iterator->path().filename().string();
                 if (iterator->is_regular_file(error) && !error && iterator->path().extension() == ".md" &&
                     name != "README.md" && name != "index.md")
@@ -61,11 +56,18 @@ namespace Sherlock::DocumentIndex
                     return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", iterator->path().string(),
                                 "a directory entry cannot be inspected", "check the repository layout");
                 }
+                iterator.increment(error);
+                if (error)
+                {
+                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
+                                "the directory cannot be walked", "check the repository layout");
+                }
             }
             return files;
         }
 
-        Foundation::Expected<std::vector<std::filesystem::path>> WalkSource(const std::filesystem::path& dir)
+        Foundation::Expected<std::vector<std::filesystem::path>> WalkSource(
+            const std::filesystem::path& dir, const std::function<Foundation::Expected<void>()>& afterIncrement = {})
         {
             std::error_code error;
             if (!std::filesystem::exists(dir, error))
@@ -84,18 +86,14 @@ namespace Sherlock::DocumentIndex
                 return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
                             "the Source directory cannot be read", "check the repository layout");
             }
-            for (; iterator != end; iterator.increment(error))
+            while (iterator != end)
             {
-                if (error)
-                {
-                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
-                                "the Source directory cannot be walked", "check the repository layout");
-                }
                 const auto name = iterator->path().filename().string();
+                bool skip = false;
                 if (iterator->is_directory(error) && !error && (name == "build" || name == "lab" || name == ".git"))
                 {
                     iterator.disable_recursion_pending();
-                    continue;
+                    skip = true;
                 }
                 if (error)
                 {
@@ -103,7 +101,7 @@ namespace Sherlock::DocumentIndex
                                 "a Source entry cannot be inspected", "check the repository layout");
                 }
                 const auto extension = iterator->path().extension();
-                if (iterator->is_regular_file(error) && !error &&
+                if (!skip && iterator->is_regular_file(error) && !error &&
                     (extension == ".h" || extension == ".hpp" || extension == ".cpp"))
                 {
                     files.push_back(iterator->path());
@@ -112,6 +110,17 @@ namespace Sherlock::DocumentIndex
                 {
                     return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", iterator->path().string(),
                                 "a Source entry cannot be inspected", "check the repository layout");
+                }
+                iterator.increment(error);
+                if (error)
+                {
+                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
+                                "the Source directory cannot be walked", "check the repository layout");
+                }
+                if (afterIncrement)
+                {
+                    auto injected = afterIncrement();
+                    if (!injected) return std::unexpected(injected.error());
                 }
             }
             return files;
@@ -221,6 +230,12 @@ namespace Sherlock::DocumentIndex
                 citations.insert(citations.end(), prose.begin(), prose.end());
             }
         }
+    }
+
+    Foundation::Expected<std::vector<std::filesystem::path>> WalkSourceForTesting(
+        const std::filesystem::path& root, std::function<Foundation::Expected<void>()> afterIncrement)
+    {
+        return WalkSource(root, afterIncrement);
     }
 
     Foundation::Expected<DocumentsBuildReport> BuildDocuments(const std::filesystem::path& repoRoot,

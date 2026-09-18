@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string_view>
 #include <string>
 #include <vector>
@@ -22,6 +23,7 @@ namespace Sherlock::Cli
         bool                  Full = false;
         bool                  Json = false;
         std::vector<std::string>* Output = nullptr;
+        std::function<Foundation::Expected<void>(std::string_view)> PlainTextSink;
     };
 
     Foundation::Expected<void> PrintHeader(const QueryEnvironment& env, std::string_view build);

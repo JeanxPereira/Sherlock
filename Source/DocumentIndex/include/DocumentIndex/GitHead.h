@@ -5,9 +5,12 @@
 #include <Foundation/Diagnostic.h>
 
 #include <filesystem>
+#include <istream>
 #include <string>
+#include <string_view>
 
 namespace Sherlock::DocumentIndex
 {
     Foundation::Expected<std::string> ReadCurrentHead(const std::filesystem::path& repoRoot);
+    Foundation::Expected<std::string> ReadGitText(std::istream& stream, std::string_view diagnosticSubject);
 }

@@ -88,14 +88,43 @@ namespace Sherlock::Cli
             if (!env.Json) std::printf("%s\n", line.c_str());
         }
 
-        void EmitText(const QueryEnvironment& env, std::string text)
+        Foundation::Expected<void> EmitText(const QueryEnvironment& env, std::string_view text)
         {
-            if (env.Output != nullptr) env.Output->push_back(text);
-            if (!env.Json)
+            if (env.Json)
             {
-                _setmode(_fileno(stdout), _O_BINARY);
-                std::fwrite(text.data(), 1, text.size(), stdout);
+                if (env.Output != nullptr) env.Output->emplace_back(text);
+                return {};
             }
+            if (env.PlainTextSink)
+            {
+                if (auto ok = env.PlainTextSink(text); !ok) return std::unexpected(ok.error());
+            }
+            else
+            {
+                if (_setmode(_fileno(stdout), _O_BINARY) == -1)
+                {
+                    return Foundation::Fail(Foundation::DiagnosticCode::Io, Foundation::Severity::NotVerified,
+                                            "EmitText", "stdout", "stdout cannot switch to binary mode", "retry the command");
+                }
+                std::size_t written = 0;
+                while (written < text.size())
+                {
+                    const auto count = std::fwrite(text.data() + written, 1, text.size() - written, stdout);
+                    if (count == 0)
+                    {
+                        return Foundation::Fail(Foundation::DiagnosticCode::Io, Foundation::Severity::NotVerified,
+                                                "EmitText", "stdout", "stdout cannot write the laudo text", "retry the command");
+                    }
+                    written += count;
+                }
+                if (std::fflush(stdout) != 0 || std::ferror(stdout))
+                {
+                    return Foundation::Fail(Foundation::DiagnosticCode::Io, Foundation::Severity::NotVerified,
+                                            "EmitText", "stdout", "stdout cannot flush the laudo text", "retry the command");
+                }
+            }
+            if (env.Output != nullptr) env.Output->emplace_back(text);
+            return {};
         }
 
         bool LooksNumeric(std::string_view text)
@@ -228,7 +257,10 @@ namespace Sherlock::Cli
         if (*stale)
             return {VerdictKind::NotVerified, 0,
                     hit->File + " has changed since Documents.db was built -- run Sherlock build docs", coverage->first, coverage->second};
-        EmitText(env, std::move(hit->Text));
+        if (auto emitted = EmitText(env, hit->Text); !emitted)
+        {
+            return {VerdictKind::NotVerified, 0, emitted.error().Format(), coverage->first, coverage->second};
+        }
         return {VerdictKind::Found, 1, {}, coverage->first, coverage->second};
     }
 }

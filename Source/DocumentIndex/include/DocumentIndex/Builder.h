@@ -6,7 +6,9 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace Sherlock::DocumentIndex
 {
@@ -22,4 +24,8 @@ namespace Sherlock::DocumentIndex
 
     Foundation::Expected<DocumentsBuildReport> BuildDocuments(const std::filesystem::path& repoRoot,
                                                               const std::filesystem::path& documentsPath);
+
+    // The post-increment seam lets the gate prove an iterator advance failure never becomes end-of-range.
+    Foundation::Expected<std::vector<std::filesystem::path>> WalkSourceForTesting(
+        const std::filesystem::path& root, std::function<Foundation::Expected<void>()> afterIncrement);
 }

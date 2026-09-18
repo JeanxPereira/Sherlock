@@ -146,76 +146,87 @@ namespace
         Expect(!sections, "SplitDocument rejects an injected stream read failure");
     }
 
+    void TestGitHeadRejectsReadFailure()
+    {
+        FailingReadBuffer buffer("ref: refs/heads/incomplete\\n");
+        std::istream      stream(&buffer);
+        const auto text = DocumentIndex::ReadGitText(stream, "injected git stream");
+        Expect(!text, "ReadGitText rejects an injected stream read failure");
+    }
+
+    void TestSourceWalkerRejectsAdvanceFailure()
+    {
+        const auto root = std::filesystem::temp_directory_path() / "SherlockSourceWalkerGate";
+        std::error_code cleanupError;
+        std::filesystem::remove_all(root, cleanupError);
+        std::filesystem::create_directories(root);
+        std::ofstream(root / "Seal.h") << "// [BIN] DesignLibrary 0x27c198c20\\n";
+        const auto walked = DocumentIndex::WalkSourceForTesting(root, [] {
+            return Foundation::Fail(Foundation::DiagnosticCode::Io, Foundation::Severity::NotVerified,
+                                    "SourceWalkerGate", "increment", "injected increment failure", "retry the walk");
+        });
+        Expect(!walked, "WalkSource propagates an iterator increment failure before end-of-range");
+        std::filesystem::remove_all(root, cleanupError);
+    }
+
     void TestReadCurrentHead()
     {
         const auto root = std::filesystem::temp_directory_path() / "SherlockGitHeadGate";
-        const std::string sha(40, 'a');
         std::error_code cleanupError;
         std::filesystem::remove_all(root, cleanupError);
-        std::filesystem::create_directories(root / ".git" / "refs" / "heads");
-        {
-            std::ofstream head(root / ".git" / "HEAD");
-            head << "ref: refs/heads/x\n";
-            std::ofstream ref(root / ".git" / "refs" / "heads" / "x");
-            ref << sha << "\n";
-        }
-        const auto loose = DocumentIndex::ReadCurrentHead(root);
-        Expect(loose.has_value() && *loose == sha, "ReadCurrentHead follows a loose ref");
-        {
-            std::ofstream head(root / ".git" / "HEAD");
-            head << sha << "\n";
-        }
-        const auto detached = DocumentIndex::ReadCurrentHead(root);
-        Expect(detached.has_value() && *detached == sha, "ReadCurrentHead returns a detached head");
-        std::filesystem::remove(root / ".git" / "refs" / "heads" / "x", cleanupError);
-        {
-            std::ofstream head(root / ".git" / "HEAD");
-            head << "ref: refs/heads/x\n";
-            std::ofstream packedFile(root / ".git" / "packed-refs");
-            packedFile << "# pack-refs with: peeled fully-peeled\n" << sha << " refs/heads/x\n";
-        }
-        const auto packed = DocumentIndex::ReadCurrentHead(root);
-        Expect(packed.has_value() && *packed == sha, "ReadCurrentHead falls back to packed refs");
+        const auto write = [](const std::filesystem::path& path, std::string_view text) {
+            std::ofstream stream(path, std::ios::binary);
+            stream << text;
+            return static_cast<bool>(stream);
+        };
+        const std::string looseSha(40, 'a'), detachedSha(40, 'b'), packedSha(40, 'c');
+        const auto normal = root / "normal";
+        std::filesystem::create_directories(normal / ".git" / "refs" / "heads");
+        Expect(write(normal / ".git" / "HEAD", "ref: refs/heads/x\n") &&
+                   write(normal / ".git" / "refs" / "heads" / "x", looseSha + "\n"),
+               "the normal loose-ref fixture writes successfully");
+        const auto loose = DocumentIndex::ReadCurrentHead(normal);
+        Expect(loose.has_value() && *loose == looseSha, "ReadCurrentHead follows a loose ref");
+        Expect(write(normal / ".git" / "HEAD", detachedSha + "\n"), "the detached fixture writes successfully");
+        const auto detached = DocumentIndex::ReadCurrentHead(normal);
+        Expect(detached.has_value() && *detached == detachedSha, "ReadCurrentHead returns a detached head");
+        std::filesystem::remove(normal / ".git" / "refs" / "heads" / "x", cleanupError);
+        Expect(write(normal / ".git" / "HEAD", "ref: refs/heads/x\n") &&
+                   write(normal / ".git" / "packed-refs", packedSha + " refs/heads/x\n"),
+               "the normal packed-ref fixture writes successfully");
+        const auto packed = DocumentIndex::ReadCurrentHead(normal);
+        Expect(packed.has_value() && *packed == packedSha, "ReadCurrentHead falls back to packed refs");
 
+        const auto linked = root / "linked";
         const auto gitdir = root / "linked-gitdir";
-        std::filesystem::create_directories(gitdir / "refs" / "heads");
-        {
-            std::ofstream dotGit(root / ".git");
-            dotGit << "gitdir: " << gitdir.string() << "\n";
-            std::ofstream head(gitdir / "HEAD");
-            head << "ref: refs/heads/x\n";
-            std::ofstream ref(gitdir / "refs" / "heads" / "x");
-            ref << sha << "\n";
-        }
-        const auto linkedLoose = DocumentIndex::ReadCurrentHead(root);
-        Expect(linkedLoose.has_value() && *linkedLoose == sha, "ReadCurrentHead follows a linked-worktree loose ref");
-        std::filesystem::remove(gitdir / "refs" / "heads" / "x", cleanupError);
-        {
-            std::ofstream linkedPackedFile(gitdir / "packed-refs");
-            linkedPackedFile << sha << " refs/heads/x\n";
-        }
-        const auto linkedPacked = DocumentIndex::ReadCurrentHead(root);
-        Expect(linkedPacked.has_value() && *linkedPacked == sha,
-               "ReadCurrentHead follows a linked-worktree packed ref");
         const auto common = root / "common-gitdir";
+        const std::string linkedLooseSha(40, 'd'), linkedPackedSha(40, 'e'), commonLooseSha(40, 'f'), commonPackedSha(40, 'g');
+        std::filesystem::create_directories(linked);
+        std::filesystem::create_directories(gitdir / "refs" / "heads");
         std::filesystem::create_directories(common / "refs" / "heads");
-        {
-            std::ofstream commonDir(gitdir / "commondir");
-            commonDir << "../common-gitdir\n";
-            std::ofstream commonRef(common / "refs" / "heads" / "x");
-            commonRef << sha << "\n";
-            std::filesystem::remove(gitdir / "packed-refs", cleanupError);
-        }
-        const auto linkedCommonLoose = DocumentIndex::ReadCurrentHead(root);
-        Expect(linkedCommonLoose.has_value() && *linkedCommonLoose == sha,
+        Expect(write(linked / ".git", "gitdir: " + gitdir.string() + "\n") &&
+                   write(gitdir / "HEAD", "ref: refs/heads/x\n") &&
+                   write(gitdir / "refs" / "heads" / "x", linkedLooseSha + "\n"),
+               "the linked-worktree loose fixture writes a gitdir file and ref successfully");
+        const auto linkedLoose = DocumentIndex::ReadCurrentHead(linked);
+        Expect(linkedLoose.has_value() && *linkedLoose == linkedLooseSha, "ReadCurrentHead follows a linked-worktree loose ref");
+        std::filesystem::remove(gitdir / "refs" / "heads" / "x", cleanupError);
+        Expect(write(gitdir / "packed-refs", linkedPackedSha + " refs/heads/x\n"),
+               "the linked-worktree packed fixture writes successfully");
+        const auto linkedPacked = DocumentIndex::ReadCurrentHead(linked);
+        Expect(linkedPacked.has_value() && *linkedPacked == linkedPackedSha, "ReadCurrentHead follows a linked-worktree packed ref");
+        std::filesystem::remove(gitdir / "packed-refs", cleanupError);
+        Expect(write(gitdir / "commondir", "../common-gitdir\n") &&
+                   write(common / "refs" / "heads" / "x", commonLooseSha + "\n"),
+               "the linked-worktree common loose fixture writes successfully");
+        const auto linkedCommonLoose = DocumentIndex::ReadCurrentHead(linked);
+        Expect(linkedCommonLoose.has_value() && *linkedCommonLoose == commonLooseSha,
                "ReadCurrentHead follows a linked-worktree common loose ref");
         std::filesystem::remove(common / "refs" / "heads" / "x", cleanupError);
-        {
-            std::ofstream commonPacked(common / "packed-refs");
-            commonPacked << sha << " refs/heads/x\n";
-        }
-        const auto linkedCommonPacked = DocumentIndex::ReadCurrentHead(root);
-        Expect(linkedCommonPacked.has_value() && *linkedCommonPacked == sha,
+        Expect(write(common / "packed-refs", commonPackedSha + " refs/heads/x\n"),
+               "the linked-worktree common packed fixture writes successfully");
+        const auto linkedCommonPacked = DocumentIndex::ReadCurrentHead(linked);
+        Expect(linkedCommonPacked.has_value() && *linkedCommonPacked == commonPackedSha,
                "ReadCurrentHead follows a linked-worktree common packed ref");
         std::filesystem::remove_all(root, cleanupError);
     }
@@ -423,6 +434,8 @@ int main()
     TestSplitDocumentLaudo();
     TestSplitDocumentKeepsSourceBytes();
     TestSplitDocumentRejectsReadFailure();
+    TestGitHeadRejectsReadFailure();
+    TestSourceWalkerRejectsAdvanceFailure();
     TestSplitDocumentConcept();
     TestReadCurrentHead();
     TestBuildDocumentsWritesCoverageFilesAndMeta();
