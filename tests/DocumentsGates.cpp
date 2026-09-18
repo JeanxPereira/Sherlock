@@ -1,5 +1,6 @@
 // Sherlock — tests/Sherlock/DocumentsGates.cpp
 // Direct Documents.db fixture gates for find and laudo.
+#include <DocumentIndex/Builder.h>
 #include <SherlockCli/Documents.h>
 #include <SherlockCli/Queries.h>
 #include <Store/Database.h>
@@ -186,6 +187,156 @@ namespace
         Expect(verdict.Kind == Cli::VerdictKind::NotVerified && output.empty(),
                "laudo reports a plain output failure without returning a successful payload");
     }
+
+    // A string under 3 significant characters cannot produce a single trigram, so
+    // SectionFtsText's MATCH is structurally unable to answer it -- find must refuse it as NOT
+    // VERIFIED, not report a silent, always-empty "not in the corpus" (finding 6). Runs before
+    // GateStalenessAndSqliteFailures drops Section, so its own "shadow pool" positive control
+    // still has a table to query.
+    void GateSubTrigramQueryIsNotVerified(const Fixture& fixture)
+    {
+        std::vector<std::string> output;
+        const auto twoLetters = Cli::RunFind(Environment(fixture, output), "UI");
+        Expect(twoLetters.Kind == Cli::VerdictKind::NotVerified && output.empty(),
+               "find refuses a 2-character query instead of silently reporting EMPTY");
+        output.clear();
+        const auto hexPrefix = Cli::RunFind(Environment(fixture, output), "0x");
+        Expect(hexPrefix.Kind == Cli::VerdictKind::NotVerified && output.empty(),
+               "find refuses a 2-character hex-prefix query the trigram index cannot answer");
+        output.clear();
+        const auto real = Cli::RunFind(Environment(fixture, output), "shadow pool");
+        Expect(real.Kind == Cli::VerdictKind::Found, "find still answers a query at or above the trigram floor");
+    }
+
+    // laudo matches a slug by path suffix across every indexed root (docs/re and docs/concepts);
+    // a basename present under both would otherwise splice two documents into one outline and
+    // stat only the first for staleness. A private fixture, since deliberately colliding with
+    // the shared fixture's own "sample" slug would break every other gate above (finding 8).
+    void GateAmbiguousSlugIsNotVerified()
+    {
+        Fixture fixture;
+        fixture.Root = std::filesystem::temp_directory_path() / "SherlockAmbiguousSlugGate";
+        std::filesystem::remove_all(fixture.Root);
+        std::filesystem::create_directories(fixture.Root / "docs" / "re");
+        std::filesystem::create_directories(fixture.Root / "docs" / "concepts");
+        fixture.Documents = fixture.Root / "Documents.db";
+
+        // Scoped: the connection must close before RunLaudo (re)opens the same file -- and
+        // before remove_all below, which a lingering handle would make fail on Windows.
+        {
+            auto db = Store::Database::Open(fixture.Documents, Store::Database::Mode::ReadWrite);
+            Expect(db.has_value(), "the ambiguous-slug fixture opens");
+            if (db)
+            {
+                Expect(Store::CreateDocumentsStore(*db).has_value() && Store::CreateDocumentIndexes(*db).has_value(),
+                       "the ambiguous-slug fixture uses the production schema APIs");
+                InsertSection(*db, "docs/re/twin.md", "", "Twin In Laudos", "laudo text\n");
+                InsertSection(*db, "docs/concepts/twin.md", "", "Twin In Concepts", "concept text\n");
+            }
+        }
+
+        std::vector<std::string> output;
+        const auto laudo = Cli::RunLaudo(Environment(fixture, output), "twin", "");
+        Expect(laudo.Kind == Cli::VerdictKind::NotVerified && laudo.Why.find("more than one file") != std::string::npos,
+               "laudo refuses an ambiguous slug instead of silently picking one of the two colliding files");
+        std::filesystem::remove_all(fixture.Root);
+    }
+
+    // Every Section a real build writes has a matching File row for its own source file
+    // (Builder.cpp always writes File before Section, for every indexed document); a Section
+    // with none is Documents.db missing its own bookkeeping, not a fresh file. Reporting "false"
+    // (fresh) for this is a silent "could not look" feeding laudo's byte-exact promise (finding 4).
+    void GateMissingFileRowIsNotVerified()
+    {
+        Fixture fixture;
+        fixture.Root = std::filesystem::temp_directory_path() / "SherlockOrphanSectionGate";
+        std::filesystem::remove_all(fixture.Root);
+        std::filesystem::create_directories(fixture.Root / "docs" / "re");
+        fixture.Documents = fixture.Root / "Documents.db";
+
+        {
+            auto db = Store::Database::Open(fixture.Documents, Store::Database::Mode::ReadWrite);
+            Expect(db.has_value(), "the orphan-section fixture opens");
+            if (db)
+            {
+                Expect(Store::CreateDocumentsStore(*db).has_value() && Store::CreateDocumentIndexes(*db).has_value(),
+                       "the orphan-section fixture uses the production schema APIs");
+                InsertSection(*db, "docs/re/orphan.md", "", "Orphan", "orphan text\n");
+            }
+        }
+
+        std::vector<std::string> output;
+        const auto laudo = Cli::RunLaudo(Environment(fixture, output), "orphan", "");
+        Expect(laudo.Kind == Cli::VerdictKind::NotVerified && output.empty() &&
+                   laudo.Why.find("File row is missing") != std::string::npos,
+               "laudo refuses to serve a section whose own File row is missing, instead of treating it as fresh");
+        std::filesystem::remove_all(fixture.Root);
+    }
+
+    // Writing the new Documents.db directly over a prior good one means any failure past that
+    // point (a bad extractor read, a disk-full mid-transaction) leaves a table-less file where a
+    // good store sat a moment ago, and q/status would report "not built" about a file that is
+    // present and working. BuildDocuments instead builds into a sibling temp path and publishes
+    // it only after a successful commit (finding 7).
+    void GateBuildDocumentsPublishesAtomically()
+    {
+        const auto root = std::filesystem::temp_directory_path() / "SherlockBuildDocumentsAtomicGate";
+        std::filesystem::remove_all(root);
+        std::filesystem::create_directories(root / "docs" / "re");
+        std::filesystem::create_directories(root / "docs" / "concepts");
+        std::filesystem::create_directories(root / "Source");
+        // A minimal detached-HEAD git directory -- ReadCurrentHead needs .git/HEAD to resolve,
+        // and a plain 40-hex line (no "ref:" prefix) skips ref resolution entirely.
+        std::filesystem::create_directories(root / ".git");
+        {
+            std::ofstream stream(root / ".git" / "HEAD", std::ios::binary);
+            stream << "0000000000000000000000000000000000000000\n";
+        }
+        {
+            std::ofstream stream(root / "docs" / "re" / "good.md", std::ios::binary);
+            stream << "## \xC2\xA7"
+                      "1 Good\r\n\r\ngood text\r\n";
+        }
+        const auto documentsPath = root / "Documents.db";
+
+        const auto first = DocumentIndex::BuildDocuments(root, documentsPath);
+        Expect(first.has_value(), "the first build succeeds and produces a good store");
+        if (!first)
+        {
+            std::filesystem::remove_all(root);
+            return;
+        }
+        const auto goodSize = std::filesystem::file_size(documentsPath);
+        Expect(goodSize > 0, "the first build's Documents.db is non-empty");
+
+        // Replace docs/re with a regular file: WalkMarkdown's directory_iterator over it fails,
+        // forcing the second build to return an error partway through -- after the good store
+        // above already exists at documentsPath.
+        std::filesystem::remove_all(root / "docs" / "re");
+        {
+            std::ofstream stream(root / "docs" / "re", std::ios::binary);
+            stream << "not a directory";
+        }
+
+        const auto second = DocumentIndex::BuildDocuments(root, documentsPath);
+        Expect(!second.has_value(),
+               "a build that cannot even walk docs/re fails -- a sanity check on this gate's own setup");
+
+        Expect(std::filesystem::exists(documentsPath), "the prior good Documents.db still exists after a failed rebuild");
+        std::error_code sizeError;
+        Expect(std::filesystem::file_size(documentsPath, sizeError) == goodSize && !sizeError,
+               "a failed rebuild never replaces the prior good Documents.db with a partial one");
+        Expect(!std::filesystem::exists(std::filesystem::path(documentsPath.string() + ".tmp")),
+               "a failed rebuild leaves no stray .tmp file behind");
+
+        {
+            auto reopened = Store::Database::Open(documentsPath, Store::Database::Mode::ReadOnly);
+            Expect(reopened.has_value() && Store::CheckDocumentsSchema(*reopened).has_value(),
+                   "the surviving Documents.db still has a valid, checkable schema");
+        }
+
+        std::filesystem::remove_all(root);
+    }
 }
 
 int main()
@@ -194,8 +345,12 @@ int main()
     GateLaudoByteExactAndJsonParity(fixture);
     GateCaseInsensitiveTitleAndNoFactsStore(fixture);
     GatePlainLaudoOutputFailure(fixture);
+    GateSubTrigramQueryIsNotVerified(fixture);
     GateStalenessAndSqliteFailures(fixture);
     GateDocumentsSchemaRefusal();
+    GateAmbiguousSlugIsNotVerified();
+    GateMissingFileRowIsNotVerified();
+    GateBuildDocumentsPublishesAtomically();
     std::filesystem::remove_all(fixture.Root);
     return Finish();
 }
