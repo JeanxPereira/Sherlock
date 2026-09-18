@@ -17,3 +17,5 @@
 
             // [BIN] GlueTest2 also tag only, address follows below
             abc; // @ 0x18a000040 second glued address
+
+        // [ASSUMPTION] provisional constant, revisit once the layer closes @ 0x27a010030

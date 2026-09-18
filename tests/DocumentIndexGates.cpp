@@ -4,6 +4,7 @@
 
 #include <DocumentIndex/CitationExtractor.h>
 #include <DocumentIndex/Builder.h>
+#include <DocumentIndex/ConceptFrontMatter.h>
 #include <DocumentIndex/FileStamp.h>
 #include <DocumentIndex/GitHead.h>
 #include <DocumentIndex/Heading.h>
@@ -322,21 +323,98 @@ namespace
         ExpectEq((*sections)[0].Title, "The colour-matrix product", "Title comes from the front matter");
     }
 
+    void TestFrontMatterDeclaredLimits()
+    {
+        const auto missing = DocumentIndex::ParseFrontMatter("Just prose, no front matter at all.\n");
+        Expect(missing.has_value(), "a page with no opening '---' is empty-and-success, not a failure");
+        if (missing)
+        {
+            Expect(missing->Title.empty(), "no Title recovered when there is no front matter to read");
+            Expect(missing->Aliases.empty(), "no Aliases recovered either");
+        }
+
+        const auto duplicated = DocumentIndex::ParseFrontMatter(
+            "---\ntitle: First\ntitle: Second\n---\nProse\n");
+        Expect(duplicated.has_value() && duplicated->Title == "Second",
+              "a duplicated key takes the LAST occurrence, silently");
+
+        const auto blockStyle = DocumentIndex::ParseFrontMatter(
+            "---\ntitle: Block\naliases:\n  - 0x27c198c20\n  - Glass.Material\n---\nProse\n");
+        Expect(blockStyle.has_value() && blockStyle->Aliases.empty(),
+              "block-style YAML aliases (one '- item' per line) parses to an empty list, not a "
+              "failure -- only the inline '[a, b, c]' form is read");
+    }
+
+    void TestSplitDocumentPreservesInvalidUtf8Byte()
+    {
+        const auto root = std::filesystem::temp_directory_path() / "SherlockByteTransparencyGate";
+        std::error_code cleanupError;
+        std::filesystem::remove_all(root, cleanupError);
+        std::filesystem::create_directories(root);
+        const auto file = root / "sample.md";
+        const std::string cp1252MiddleDot = "\xB7"; // not a valid UTF-8 start byte on its own
+        {
+            std::ofstream stream(file, std::ios::binary);
+            stream << "# 1 Heading\nbody " << cp1252MiddleDot << " tail\n";
+        }
+        const auto sections = DocumentIndex::SplitDocument(file, "docs/re/sample.md");
+        Expect(sections.has_value() && sections->size() == 1, "SplitDocument reads the byte as-is");
+        if (sections && sections->size() == 1)
+        {
+            Expect((*sections)[0].Text.find(cp1252MiddleDot) != std::string::npos,
+                  "the non-UTF-8 byte survives the round trip unchanged (byte-transparent, not validated)");
+        }
+        std::filesystem::remove_all(root, cleanupError);
+    }
+
+    void TestBuildDocumentsCountsHeadinglessLaudoAsReadWithZeroSections()
+    {
+        const auto root = std::filesystem::temp_directory_path() / "SherlockHeadinglessLaudoGate";
+        const auto documents = root / "out" / "Documents.db";
+        std::error_code cleanupError;
+        std::filesystem::remove_all(root, cleanupError);
+        std::filesystem::create_directories(root / ".git");
+        std::filesystem::create_directories(root / "docs" / "re");
+        std::filesystem::create_directories(root / "docs" / "concepts");
+        std::filesystem::create_directories(root / "Source");
+        {
+            std::ofstream head(root / ".git" / "HEAD");
+            head << std::string(40, 'c') << "\n";
+            std::ofstream re(root / "docs" / "re" / "no-heading.md", std::ios::binary);
+            re << "Prose with no heading at all -- nothing to split on.\n";
+        }
+        const auto report = DocumentIndex::BuildDocuments(root, documents);
+        Expect(report.has_value(), "BuildDocuments indexes a heading-less laudo without failing");
+        if (report)
+        {
+            ExpectEq(report->LaudoFilesRead, std::uint64_t{1},
+                    "the heading-less file counts as read for Coverage");
+            ExpectEq(report->SectionsWritten, std::uint64_t{0},
+                    "it contributes zero Sections -- unreachable by find/laudo despite counting as read");
+        }
+        std::filesystem::remove_all(root, cleanupError);
+    }
+
     void TestCitationExtraction()
     {
         const auto text      = ReadFixture("citation-sample.md");
         const auto citations = DocumentIndex::ExtractCitations(text);
         std::size_t addresses = 0, symbols = 0;
         bool sawTargetAddress = false, sawShortHexAsAddress = false;
+        bool sawZeroPaddedFlagsAsAddress = false, sawZeroFloatAsAddress = false;
         bool sawMangled = false, sawDottedSymbol = false, sawSecondDottedSymbol = false;
         bool sawFileNameAsSymbol = false, sawPathAsSymbol = false, sawBareWordAsSymbol = false;
+        bool sawFrameworkAsSymbol = false, sawDylibAsSymbol = false, sawShaderAsSymbol = false;
+        bool sawUppercaseExtensionAsSymbol = false;
         for (const auto& citation : citations)
         {
             if (citation.Address)
             {
                 ++addresses;
-                sawTargetAddress     = sawTargetAddress || *citation.Address == 0x27c198c20ull;
-                sawShortHexAsAddress = sawShortHexAsAddress || *citation.Address == 0x1a2bull;
+                sawTargetAddress          = sawTargetAddress || *citation.Address == 0x27c198c20ull;
+                sawShortHexAsAddress      = sawShortHexAsAddress || *citation.Address == 0x1a2bull;
+                sawZeroPaddedFlagsAsAddress = sawZeroPaddedFlagsAsAddress || *citation.Address == 0x52ull;
+                sawZeroFloatAsAddress     = sawZeroFloatAsAddress || *citation.Address == 0x0ull;
             }
             if (citation.Symbol)
             {
@@ -349,22 +427,37 @@ namespace
                 sawPathAsSymbol        = sawPathAsSymbol || *citation.Symbol == "Assets/Icons.Bundle";
                 sawBareWordAsSymbol    = sawBareWordAsSymbol || *citation.Symbol == "DesignLibrary" ||
                                          *citation.Symbol == "DarkShadow";
+                sawFrameworkAsSymbol   = sawFrameworkAsSymbol || *citation.Symbol == "SwiftUI.framework";
+                sawDylibAsSymbol       = sawDylibAsSymbol || *citation.Symbol == "libswiftCore.dylib";
+                sawShaderAsSymbol      = sawShaderAsSymbol || *citation.Symbol == "Field.frag";
+                sawUppercaseExtensionAsSymbol = sawUppercaseExtensionAsSymbol || *citation.Symbol == "Foo.MD";
             }
         }
         ExpectEq(addresses, std::size_t(1),
                 "0x27c198c20 appears twice in prose, once bare, and dedupes to one Address; the short "
-                "hex-ish 0x1a2b token never qualifies");
+                "hex-ish 0x1a2b token never qualifies, and neither do the zero-padded flags/float "
+                "tokens -- six-plus hex digits, but not cache-shaped");
         Expect(sawTargetAddress, "the deduped address is the one the fixture cites");
         Expect(!sawShortHexAsAddress, "0x1a2b has too few hex digits to become an Address citation");
+        Expect(!sawZeroPaddedFlagsAsAddress,
+              "flags=0x00000052 is six-plus hex digits but starts with zero, not a cache-shaped VA");
+        Expect(!sawZeroFloatAsAddress,
+              "0x00000000 (a float's bit pattern) is likewise excluded by the cache-address shape");
         ExpectEq(symbols, std::size_t(3),
                 "extraction closes on exactly the three real symbols: two dotted chains and the "
-                "mangled name -- a file name, a path and a dotted mention repeated twice never add up");
+                "mangled name -- a file name, a path, a dotted mention repeated twice, a framework, "
+                "a dylib, a shader and a case-folded extension never add up");
         Expect(sawMangled, "the mangled _$s... token becomes a Symbol");
         Expect(sawDottedSymbol, "a dotted Apple-style chain becomes a Symbol");
         Expect(sawSecondDottedSymbol, "a second, distinct dotted chain also becomes a Symbol");
         Expect(!sawFileNameAsSymbol, "WindowControlColors.h is excluded as a file name, not a symbol");
         Expect(!sawPathAsSymbol, "Assets/Icons.Bundle is excluded as a path, not a symbol");
         Expect(!sawBareWordAsSymbol, "a dotless backtick word is never mistaken for a dotted symbol");
+        Expect(!sawFrameworkAsSymbol, "SwiftUI.framework is a framework name, not a symbol");
+        Expect(!sawDylibAsSymbol, "libswiftCore.dylib is a dylib name, not a symbol");
+        Expect(!sawShaderAsSymbol, "Field.frag is a shader file name, not a symbol");
+        Expect(!sawUppercaseExtensionAsSymbol,
+              "Foo.MD is excluded by its extension even though the extension is spelled in uppercase");
     }
 
     void TestSealExtraction()
@@ -373,45 +466,60 @@ namespace
                                                  "tests/Sherlock/fixtures/seal-sample.txt");
         Expect(seals.has_value(), "ExtractSeals reads the fixture");
         const auto& rows = *seals;
-        ExpectEq(rows.size(), std::size_t(7),
-                "seven seals: the string-literal '[BIN]' is never scanned (no comment block backs it)");
+        ExpectEq(rows.size(), std::size_t(9),
+                "nine seals: the string-literal '[BIN]' is never scanned (no comment block backs "
+                "it), the AgentCanvasKit control's two addresses each produce their own row, and "
+                "[ASSUMPTION] is one of the tags this port now recognises alongside BIN/KIT/OBS/API");
 
-        ExpectEq(rows[0].Tag, "BIN", "first row is [BIN]");
+        ExpectEq(rows[0].Tag, "BIN", "first row is [BIN] AgentCanvasKit's first address");
         ExpectEq(rows[0].Image.value_or(""), "AgentCanvasKit", "its image");
         Expect(rows[0].Address.has_value() && *rows[0].Address == 0x22695fe48ull,
-              "the first address in the segment, matching the clean control");
+              "the getter address -- the clean two-address control's first row");
 
-        ExpectEq(rows[1].Tag, "BIN", "second row is [BIN] DesignLibrary");
-        ExpectEq(rows[1].Image.value_or(""), "DesignLibrary", "its image");
-        Expect(!rows[1].Address.has_value(),
+        ExpectEq(rows[1].Tag, "BIN", "second row is [BIN] AgentCanvasKit's second address");
+        ExpectEq(rows[1].Image.value_or(""), "AgentCanvasKit", "same image, same File/Line");
+        Expect(rows[1].Address.has_value() && *rows[1].Address == 0x22695fcf4ull,
+              "the initializer address -- the clean two-address control's second row, the one a "
+              "first-address-only extractor drops entirely");
+
+        ExpectEq(rows[2].Tag, "BIN", "third row is [BIN] DesignLibrary");
+        ExpectEq(rows[2].Image.value_or(""), "DesignLibrary", "its image");
+        Expect(!rows[2].Address.has_value(),
               "no-address: 0x27c198c20 sits BEFORE the tag, matching tools/seals-baseline.txt's own verdict");
 
-        ExpectEq(rows[2].Tag, "KIT", "third row is a trailing-comment [KIT] seal");
-        Expect(!rows[2].Image.has_value(),
+        ExpectEq(rows[3].Tag, "KIT", "fourth row is a trailing-comment [KIT] seal");
+        Expect(!rows[3].Image.has_value(),
               "lint_seals.py's BIN regex is the only one that captures an image -- [KIT] never gets one, "
               "so the word right after the tag ('Figma') must not leak in as an Image");
-        Expect(!rows[2].Address.has_value(), "no hex in this seal's prose");
+        Expect(!rows[3].Address.has_value(), "no hex in this seal's prose");
 
-        ExpectEq(rows[3].Tag, "API", "fourth row is [API]");
-        Expect(!rows[3].Image.has_value(), "[API] never captures an image either");
-        Expect(!rows[3].Address.has_value(), "[API] with genuinely no address stays no-address");
+        ExpectEq(rows[4].Tag, "API", "fifth row is [API]");
+        Expect(!rows[4].Image.has_value(), "[API] never captures an image either");
+        Expect(!rows[4].Address.has_value(), "[API] with genuinely no address stays no-address");
 
-        ExpectEq(rows[4].Tag, "OBS", "fifth row is [OBS]");
-        Expect(!rows[4].Address.has_value(),
+        ExpectEq(rows[5].Tag, "OBS", "sixth row is [OBS]");
+        Expect(!rows[5].Address.has_value(),
               "0x100002710 is ROOTFS-shaped (0x10...), not cache-shaped -- an address-looking hex "
               "outside the cache range must never become an Address citation");
 
-        ExpectEq(rows[5].Tag, "BIN", "sixth row is the glued-continuation [BIN]");
-        ExpectEq(rows[5].Image.value_or(""), "GlueTest", "its image");
-        Expect(rows[5].Address.has_value() && *rows[5].Address == 0x18a000030ull,
+        ExpectEq(rows[6].Tag, "BIN", "seventh row is the glued-continuation [BIN]");
+        ExpectEq(rows[6].Image.value_or(""), "GlueTest", "its image");
+        Expect(rows[6].Address.has_value() && *rows[6].Address == 0x18a000030ull,
               "the address sits on the NEXT line, glued to this one only because the continuation "
               "offset is measured on the line's trimmed text, not its raw (still-indented) one");
 
-        ExpectEq(rows[6].Tag, "BIN", "seventh row is a second glued-continuation [BIN]");
-        ExpectEq(rows[6].Image.value_or(""), "GlueTest2", "its image");
-        Expect(rows[6].Address.has_value() && *rows[6].Address == 0x18a000040ull,
+        ExpectEq(rows[7].Tag, "BIN", "eighth row is a second glued-continuation [BIN]");
+        ExpectEq(rows[7].Image.value_or(""), "GlueTest2", "its image");
+        Expect(rows[7].Address.has_value() && *rows[7].Address == 0x18a000040ull,
               "this continuation's trimmed offset is 5 (between 4 and 8) -- a gate whose threshold "
               "check tolerates 8->4 without noticing must still catch this one");
+
+        ExpectEq(rows[8].Tag, "ASSUMPTION", "ninth row is [ASSUMPTION], one of the tags this port "
+                "recognises alongside BIN/KIT/OBS/API");
+        Expect(!rows[8].Image.has_value(), "[ASSUMPTION] never captures an image either");
+        Expect(rows[8].Address.has_value() && *rows[8].Address == 0x27a010030ull,
+              "its own cache-shaped address, extracted the same way KIT/OBS/API's is (decision 6's "
+              "widening, extended to every tag lint_seals.py itself treats as a real seal)");
 
         for (const auto& row : rows)
         {
@@ -437,6 +545,9 @@ int main()
     TestGitHeadRejectsReadFailure();
     TestSourceWalkerRejectsAdvanceFailure();
     TestSplitDocumentConcept();
+    TestFrontMatterDeclaredLimits();
+    TestSplitDocumentPreservesInvalidUtf8Byte();
+    TestBuildDocumentsCountsHeadinglessLaudoAsReadWithZeroSections();
     TestReadCurrentHead();
     TestBuildDocumentsWritesCoverageFilesAndMeta();
     TestBuildDocumentsRefusesDirectoryAsDatabasePath();
