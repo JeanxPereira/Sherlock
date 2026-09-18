@@ -47,7 +47,8 @@ sherlock_module(Facts
     LINKS Sherlock::DyldSharedCache Sherlock::Store capstone_static)
 
 sherlock_module(DocumentIndex
-    SOURCES ${S}/DocumentIndex/Heading.cpp
+    SOURCES ${S}/DocumentIndex/Heading.cpp ${S}/DocumentIndex/ConceptFrontMatter.cpp
+            ${S}/DocumentIndex/LaudoSections.cpp
     LINKS Sherlock::Foundation)
 
 add_executable(Sherlock
