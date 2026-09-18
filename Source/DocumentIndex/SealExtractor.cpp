@@ -225,7 +225,9 @@ namespace Sherlock::DocumentIndex
         }
         const auto lines = SplitLines(*content);
 
-        static const std::regex tagPattern(R"(\[(BIN|KIT|OBS|API)\])");
+        // lint_seals.py's own TAG additionally recognises INF/DEMO/ASSUMPTION (and refuses
+        // RE/DOC/WEB as unknown-tag -- those are never seals, so this pattern never matches them).
+        static const std::regex tagPattern(R"(\[(BIN|KIT|OBS|API|INF|DEMO|ASSUMPTION)\])");
         static const std::regex cacheAddress(R"(0x(1[89a-f][0-9a-f]{7}|2[0-9a-f]{8})\b)");
 
         std::vector<SealRow> seals;
@@ -267,26 +269,40 @@ namespace Sherlock::DocumentIndex
                     }
                 }
 
-                SealRow row;
-                row.File = std::string(repoRelativePath);
-                row.Line = LineOfOffset(block, tag.Position);
-                row.Tag  = tag.Tag;
-                row.Image = std::move(image);
+                SealRow templateRow;
+                templateRow.File  = std::string(repoRelativePath);
+                templateRow.Line  = LineOfOffset(block, tag.Position);
+                templateRow.Tag   = tag.Tag;
+                templateRow.Image = image;
 
+                // A seal's own segment can carry more than one cache-shaped address (a symbol
+                // address plus a related data address on the same line, or a getter/initializer
+                // pair like SnippetSizeConstants.h:6's own clean control) -- every one of them is
+                // a distinct fact `q`'s "sealed at" must be able to answer for, so every one gets
+                // its own SealRow sharing this segment's File/Line/Tag/Image. A segment with no
+                // address at all still produces exactly one row, Address left null (the negative
+                // case LayerResolver.cpp:864 relies on: the address sits before the tag, so this
+                // segment's forward-only search finds none).
+                bool foundAddress = false;
                 if (afterImage < segEnd)
                 {
-                    std::cmatch addressMatch;
                     const char* segmentBegin = block.Text.data() + afterImage;
                     const char* segmentEnd   = block.Text.data() + segEnd;
-                    if (std::regex_search(segmentBegin, segmentEnd, addressMatch, cacheAddress))
+                    for (std::cregex_iterator it(segmentBegin, segmentEnd, cacheAddress), end; it != end; ++it)
                     {
                         std::uint64_t value = 0;
-                        const auto     text  = addressMatch.str();
+                        const auto     text  = it->str();
                         std::from_chars(text.data() + 2, text.data() + text.size(), value, 16);
+                        SealRow row = templateRow;
                         row.Address = value;
+                        seals.push_back(std::move(row));
+                        foundAddress = true;
                     }
                 }
-                seals.push_back(std::move(row));
+                if (!foundAddress)
+                {
+                    seals.push_back(templateRow);
+                }
             }
         }
         return seals;

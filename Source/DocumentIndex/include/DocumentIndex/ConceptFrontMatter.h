@@ -21,6 +21,12 @@ namespace Sherlock::DocumentIndex
 
     // A file with no front matter (every docs/re/*.md laudo) returns an empty FrontMatter,
     // BodyStart 0 -- the caller distinguishes "concept page" from "laudo" by path, not by this.
+    //
+    // Three declared limits, none hit by the 210 docs/concepts pages parsed today (locked by
+    // DocumentIndexGates.cpp, so a page that DOES hit one fails loud, not silently): a
+    // docs/concepts page with no front matter of its own reads exactly like a laudo, empty and
+    // successful; a duplicated `type`/`title`/`aliases` key takes the last occurrence, no
+    // diagnostic; `aliases:` only reads the inline `[a, b, c]` form, never YAML's block style.
     Foundation::Expected<FrontMatter> ParseFrontMatter(std::string_view text);
 
     // The byte offset of "<!-- GENERATED" (concepts.py's own marker), or text.size() when absent.

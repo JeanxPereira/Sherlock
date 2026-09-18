@@ -144,7 +144,7 @@ set_tests_properties(Sherlock.BuildDocuments PROPERTIES FIXTURES_SETUP SherlockD
 # whenever docs/re, docs/concepts or Source/'s seals grow or shrink enough to move them.
 set(SHERLOCK_DOCUMENTS_RE_SECTIONS 2713)
 set(SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS 209)
-set(SHERLOCK_DOCUMENTS_BIN_SEALS 981)
+set(SHERLOCK_DOCUMENTS_BIN_SEALS 2144)
 
 add_test(NAME Sherlock.DocumentsExactCounts
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/DocumentsExactCounts.py

@@ -14,13 +14,22 @@ namespace Sherlock::DocumentIndex
     {
         bool HasFileExtension(std::string_view token)
         {
-            static constexpr std::string_view kExtensions[] = {".h",  ".hpp", ".cpp",  ".md",
-                                                                 ".py", ".json", ".cmake", ".ps1", ".txt"};
+            // Source-and-docs extensions, plus the Apple binary/asset file names a laudo cites
+            // by name (a framework, a dylib, a shader, a rootfs bundle, an Info.plist-style file,
+            // a font, a compiled asset catalog): every one measured as a real backtick-quoted
+            // false positive in docs/re + docs/concepts (never a genuine dotted symbol there).
+            static constexpr std::string_view kExtensions[] = {
+                ".h",     ".hpp",  ".cpp",   ".md",    ".py",       ".json",     ".cmake",
+                ".ps1",   ".txt",  ".framework", ".dylib", ".frag", ".app",      ".plist",
+                ".ttf",   ".ttc",  ".car",   ".bundle", ".metallib"};
             for (const auto ext : kExtensions)
             {
                 if (token.size() > ext.size() &&
                     std::equal(ext.begin(), ext.end(), token.end() - ext.size(),
-                               [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == b; }))
+                               [](char a, char b) {
+                                   return std::tolower(static_cast<unsigned char>(a)) ==
+                                          std::tolower(static_cast<unsigned char>(b));
+                               }))
                 {
                     return true;
                 }
@@ -50,7 +59,12 @@ namespace Sherlock::DocumentIndex
         std::set<std::uint64_t> addresses;
         std::set<std::string>   symbols;
 
-        static const std::regex addressPattern(R"(0x[0-9a-fA-F]{6,})");
+        // The cache-address SHAPE (lint_seals.py's own ADDR), not a bare hex-digit-count test: a
+        // struct's `flags=0x00000052` or a float's `0x00000000` bit pattern is six-plus hex digits
+        // long, but neither is a cache VA -- both start with zero, which the shape test refuses
+        // structurally, the same way a cache image's seal can never wear a rootfs address
+        // (SealExtractor.cpp's own cacheAddress).
+        static const std::regex addressPattern(R"(0x(1[89a-f][0-9a-f]{7}|2[0-9a-f]{8})\b)");
         for (auto it = std::cregex_iterator(text.data(), text.data() + text.size(), addressPattern);
              it != std::cregex_iterator(); ++it)
         {

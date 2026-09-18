@@ -51,7 +51,19 @@ def main():
     has_row(
         "SELECT 1 FROM Seal WHERE File = ? AND Line = ? AND Tag = 'BIN' AND Image = ? AND Address = ?",
         ("Source/AgentCanvasKit/include/AgentCanvasKit/SnippetSizeConstants.h", 6, "AgentCanvasKit", 0x22695fe48),
-        "the clean SnippetSizeConstants.h:6 [BIN] control resolves Image and Address")
+        "the clean SnippetSizeConstants.h:6 [BIN] control resolves its getter Address")
+    has_row(
+        "SELECT 1 FROM Seal WHERE File = ? AND Line = ? AND Tag = 'BIN' AND Image = ? AND Address = ?",
+        ("Source/AgentCanvasKit/include/AgentCanvasKit/SnippetSizeConstants.h", 6, "AgentCanvasKit", 0x22695fcf4),
+        "the SAME clean control ALSO resolves its initializer Address -- a first-address-only "
+        "extractor drops this row entirely, so this is the two-address control's second half")
+
+    row_count = conn.execute(
+        "SELECT COUNT(*) FROM Seal WHERE File = ? AND Line = ? AND Tag = 'BIN'",
+        ("Source/AgentCanvasKit/include/AgentCanvasKit/SnippetSizeConstants.h", 6)).fetchone()[0]
+    print(("PASS" if row_count == 2 else "FAIL") +
+          ": SnippetSizeConstants.h:6 seals exactly 2 rows, one per address (got %d)" % row_count)
+    ok = ok and row_count == 2
 
     conn.close()
     return 0 if ok else 1

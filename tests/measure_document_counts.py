@@ -80,6 +80,10 @@ def main():
                      if os.path.basename(f) != "index.md"]
     concept_sections = len(concept_files)  # one Section per file, decision 3
 
+    # One row PER ADDRESS in a BIN-tagged segment (SealExtractor.cpp's own count, Seal.Tag = 'BIN'),
+    # not one row per tag occurrence: a segment can carry more than one cache-shaped address (the
+    # SnippetSizeConstants.h:6 clean control seals two), and a segment with none still counts as
+    # one row, Address null.
     bin_seals = 0
     for dirpath, dirs, files in os.walk(os.path.join(root, "Source")):
         dirs[:] = [d for d in dirs if d not in ("build", "lab", ".git")]
@@ -88,7 +92,12 @@ def main():
                 continue
             lines = open(os.path.join(dirpath, fn), encoding="utf-8", errors="replace").read().split("\n")
             for _, blk in lint_seals.blocks(lines):
-                bin_seals += len(lint_seals.BIN.findall("\n".join(blk)))
+                text = "\n".join(blk)
+                bin_matches = list(lint_seals.BIN.finditer(text))
+                for idx, m in enumerate(bin_matches):
+                    seg_end = bin_matches[idx + 1].start() if idx + 1 < len(bin_matches) else len(text)
+                    addrs = list(lint_seals.ADDR.finditer(text, m.end(), seg_end))
+                    bin_seals += max(1, len(addrs))
 
     print("SHERLOCK_DOCUMENTS_RE_SECTIONS", re_sections)
     print("SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS", concept_sections)

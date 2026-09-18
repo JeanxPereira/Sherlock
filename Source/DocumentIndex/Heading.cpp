@@ -121,10 +121,13 @@ namespace Sherlock::DocumentIndex
         }
 
         // '§' is UTF-8 0xC2 0xA7; std::regex's ECMAScript grammar accepts the \xHH hex escape.
-        // Covers every numbered form measured in docs/re: "§5." (bare), "§10 Title" (no period,
-        // more text follows), "5.1 Title" (no '§'). A form outside this (e.g. "§9b.") does not
-        // match and falls through to the unnumbered case below, keeping its raw text as Title --
-        // graceful, not a crash; the sample fixture carries exactly this case.
+        // Covers every numbered form measured in docs/re: "§5. Title" (a period, then a title),
+        // "§10 Title" (no period, more text follows), "5.1 Title" (no '§'). The trailing `\s+`
+        // REQUIRES at least one title character after the number -- a heading numbered but with
+        // no title text at all (a bare "§5." with nothing following) does not match this pattern
+        // either, and falls through to the unnumbered case below, keeping its raw text as Title.
+        // A form outside the numbered shape (e.g. "§9b.") does the same -- graceful, not a crash;
+        // the sample fixture carries exactly that case.
         const std::regex& NumberedPattern()
         {
             static const std::regex pattern(R"(^(?:\xC2\xA7)?(\d+(?:\.\d+)*)\.?\s+(.*)$)");

@@ -28,36 +28,56 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "References" / "scripts"))
 import lint_seals  # noqa: E402
 
-EXT = (".h", ".cpp", ".hpp")
+EXT = (".h", ".cpp", ".hpp", ".frag", ".vert", ".glsl")
 SKIP_DIRS = {"build", "lab", ".git"}
 
 Seal = tuple[str, int, str, Optional[int]]  # (relpath, line, image, address)
+
+
+def files_scanned(source_dir: Path) -> set[str]:
+    """Every file EXT would hand to the scanner -- the coverage denominator. Distinct from "files
+    with at least one BIN hit": a directory can carry plenty of .h/.cpp/.frag/... that seal
+    nothing at all, and printing only the files WITH a hit as "coverage" hides that this check
+    never looked at the rest."""
+    found: set[str] = set()
+    for root, dirs, files in os.walk(source_dir):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for fn in files:
+            if fn.endswith(EXT):
+                found.add(os.path.join(root, fn))
+    return found
 
 
 def python_bin_seals(source_dir: Path, repo: Path) -> set[Seal]:
     """(relpath, line, image, address) for every BIN tag lint_seals.py's own blocks()/BIN/ADDR
     find, walking the exact same per-tag segmentation scan() uses (`bin_matches[idx + 1]` closes
     a seal's own segment) -- everything except the dsc.owner address-resolution step, which
-    DocumentIndex has no cache dependency to reproduce and does not claim to (decision 6)."""
+    DocumentIndex has no cache dependency to reproduce and does not claim to (decision 6).
+
+    One row PER ADDRESS in a segment, not just its first: a segment can carry more than one
+    cache-shaped address (SnippetSizeConstants.h:6's own clean control seals two), and a seal row
+    for only the first would leave every other address in that segment unrepresented on both sides
+    of the comparison -- silently agreeing with a Sherlock that also only kept the first, which is
+    exactly the bug this parity check exists to catch. A segment with no address still contributes
+    one row, address None, matching the no-address negative control."""
     found: set[Seal] = set()
-    for root, dirs, files in os.walk(source_dir):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        for fn in files:
-            if not fn.endswith(EXT):
-                continue
-            path = os.path.join(root, fn)
-            rel = os.path.relpath(path, repo).replace("\\", "/")
-            lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
-            for start, blk in lint_seals.blocks(lines):
-                text = "\n".join(blk)
-                bin_matches = list(lint_seals.BIN.finditer(text))
-                for idx, m in enumerate(bin_matches):
-                    img = m.group(1) or ""
-                    seg_end = bin_matches[idx + 1].start() if idx + 1 < len(bin_matches) else len(text)
-                    addrs = [int(a.group(0), 16) for a in lint_seals.ADDR.finditer(text, m.end(), seg_end)]
-                    addr = addrs[0] if addrs else None
-                    within = text.count("\n", 0, m.start())
-                    found.add((rel, start + within, img, addr))
+    for path in files_scanned(source_dir):
+        rel = os.path.relpath(path, repo).replace("\\", "/")
+        lines = open(path, encoding="utf-8", errors="replace").read().split("\n")
+        for start, blk in lint_seals.blocks(lines):
+            text = "\n".join(blk)
+            bin_matches = list(lint_seals.BIN.finditer(text))
+            for idx, m in enumerate(bin_matches):
+                img = m.group(1) or ""
+                seg_end = bin_matches[idx + 1].start() if idx + 1 < len(bin_matches) else len(text)
+                addrs = [int(a.group(0), 16) for a in lint_seals.ADDR.finditer(text, m.end(), seg_end)]
+                within = text.count("\n", 0, m.start())
+                line_no = start + within
+                if addrs:
+                    for addr in addrs:
+                        found.add((rel, line_no, img, addr))
+                else:
+                    found.add((rel, line_no, img, None))
     return found
 
 
@@ -100,8 +120,10 @@ def main() -> int:
     except SystemExit as exit_code:
         return int(exit_code.code)
 
-    files_scanned = {row[0] for row in py}
-    print("coverage: %d BIN seals compared across %d files" % (len(py), len(files_scanned)))
+    total_scanned = files_scanned(source_dir)
+    files_with_hits = {row[0] for row in py}
+    print("coverage: %d BIN seals compared across %d files scanned (%d carry at least one)"
+          % (len(py), len(total_scanned), len(files_with_hits)))
     if not py:
         print("NOT VERIFIED: 0 BIN seals compared -- Source/ has no BIN seals, or lint_seals.py "
               "could not read it; either is a reason to distrust a green run, never to print one")

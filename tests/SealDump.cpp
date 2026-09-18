@@ -12,10 +12,16 @@ using namespace Sherlock;
 
 namespace
 {
+    // lint_seals.py's own EXT also scans .frag/.vert/.glsl (and .py/.ps1/.cmake/CMakeLists.txt,
+    // which use "#" comments and are out of scope for this "//"-only port -- SealExtractor.h's own
+    // header comment). Source/Platform/shaders carries real BIN seals in .frag and .glsl files;
+    // excluding them left 50 real seals unindexed and this dump's parity comparison silently short
+    // of the ground truth it claims to check.
     bool HasSealExtension(const std::filesystem::path& path)
     {
         const auto ext = path.extension().string();
-        return ext == ".h" || ext == ".cpp" || ext == ".hpp";
+        return ext == ".h" || ext == ".cpp" || ext == ".hpp" || ext == ".frag" || ext == ".vert" ||
+               ext == ".glsl";
     }
 
     // Matches lint_seals.py's own os.walk exclusion (dirs not in {build, lab, .git}).
