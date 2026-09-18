@@ -98,9 +98,7 @@ namespace Sherlock::DocumentIndex
                     return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", iterator->path().string(),
                                 "a Source entry cannot be inspected", "check the repository layout");
                 }
-                const auto extension = iterator->path().extension();
-                if (!skip && iterator->is_regular_file(error) && !error &&
-                    (extension == ".h" || extension == ".hpp" || extension == ".cpp"))
+                if (!skip && iterator->is_regular_file(error) && !error && HasSealExtension(iterator->path()))
                 {
                     files.push_back(iterator->path());
                 }
@@ -288,6 +286,13 @@ namespace Sherlock::DocumentIndex
         const std::filesystem::path& root, std::function<Foundation::Expected<void>()> afterIncrement)
     {
         return WalkSource(root, afterIncrement);
+    }
+
+    bool HasSealExtension(const std::filesystem::path& path)
+    {
+        const auto extension = path.extension();
+        return extension == ".h" || extension == ".hpp" || extension == ".cpp" || extension == ".frag" ||
+               extension == ".vert" || extension == ".glsl";
     }
 
     bool IsIndexedMarkdown(const std::filesystem::path& path)

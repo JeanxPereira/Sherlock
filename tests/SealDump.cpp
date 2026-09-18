@@ -1,7 +1,9 @@
 // Sherlock — tests/Sherlock/SealDump.cpp
 // Walks a directory with Sherlock::DocumentIndex::ExtractSeals and prints one TSV row per seal,
-// for DocumentIndexParity.py to compare against lint_seals.py -- Task 6's Builder does not exist
-// yet, so this is the only way to run the C++ extractor over the whole tree today.
+// for DocumentIndexParity.py to compare against lint_seals.py -- and against Builder.cpp's own
+// WalkSource, which shares DocumentIndex::HasSealExtension with this dump so the two can never
+// widen independently again (a shader seal Builder skipped, DocumentIndexParity.py still passed).
+#include <DocumentIndex/Builder.h>
 #include <DocumentIndex/SealExtractor.h>
 
 #include <cstdio>
@@ -12,18 +14,6 @@ using namespace Sherlock;
 
 namespace
 {
-    // lint_seals.py's own EXT also scans .frag/.vert/.glsl (and .py/.ps1/.cmake/CMakeLists.txt,
-    // which use "#" comments and are out of scope for this "//"-only port -- SealExtractor.h's own
-    // header comment). Source/Platform/shaders carries real BIN seals in .frag and .glsl files;
-    // excluding them left 50 real seals unindexed and this dump's parity comparison silently short
-    // of the ground truth it claims to check.
-    bool HasSealExtension(const std::filesystem::path& path)
-    {
-        const auto ext = path.extension().string();
-        return ext == ".h" || ext == ".cpp" || ext == ".hpp" || ext == ".frag" || ext == ".vert" ||
-               ext == ".glsl";
-    }
-
     // Matches lint_seals.py's own os.walk exclusion (dirs not in {build, lab, .git}).
     bool UnderExcludedDirectory(const std::filesystem::path& relative)
     {
@@ -57,7 +47,7 @@ int main(int argc, char** argv)
     int exitCode = 0;
     for (const auto& entry : std::filesystem::recursive_directory_iterator(sourceDir))
     {
-        if (!entry.is_regular_file() || !HasSealExtension(entry.path()))
+        if (!entry.is_regular_file() || !DocumentIndex::HasSealExtension(entry.path()))
         {
             continue;
         }

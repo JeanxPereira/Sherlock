@@ -37,4 +37,12 @@ namespace Sherlock::DocumentIndex
     // The markdown counterpart of WalkSourceForTesting: lists the files BuildDocuments would
     // index under one directory (non-recursive, matching WalkMarkdown), for the same reason.
     Foundation::Expected<std::vector<std::filesystem::path>> WalkMarkdownForCli(const std::filesystem::path& dir);
+
+    // The rule WalkSource uses to decide whether a Source/ file carries seals worth extracting --
+    // exported so SealDump (the parity dump DocumentIndexParity.py compares the built store
+    // against) shares this exact rule instead of a second one that drifts from it. Matches
+    // lint_seals.py's own EXT for the extensions that use "//" comments; lint_seals.py additionally
+    // scans .py/.ps1/.cmake/CMakeLists.txt, which use "#" comments and are out of scope for this
+    // "//"-only extractor (SealExtractor.h's own header comment).
+    bool HasSealExtension(const std::filesystem::path& path);
 }

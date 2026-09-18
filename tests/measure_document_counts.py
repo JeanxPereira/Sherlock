@@ -84,11 +84,15 @@ def main():
     # not one row per tag occurrence: a segment can carry more than one cache-shaped address (the
     # SnippetSizeConstants.h:6 clean control seals two), and a segment with none still counts as
     # one row, Address null.
+    #
+    # Extensions match DocumentIndex::HasSealExtension (Builder.h/.cpp) and SealDump.cpp's own
+    # walk exactly -- .h/.cpp/.hpp plus the shader extensions (.frag/.vert/.glsl) that carry real
+    # BIN-tagged seals outside Source/Platform/shaders too (QuartzCore, DesignLibrary, SwiftUICore).
     bin_seals = 0
     for dirpath, dirs, files in os.walk(os.path.join(root, "Source")):
         dirs[:] = [d for d in dirs if d not in ("build", "lab", ".git")]
         for fn in files:
-            if not fn.endswith((".h", ".cpp", ".hpp")):
+            if not fn.endswith((".h", ".cpp", ".hpp", ".frag", ".vert", ".glsl")):
                 continue
             lines = open(os.path.join(dirpath, fn), encoding="utf-8", errors="replace").read().split("\n")
             for _, blk in lint_seals.blocks(lines):

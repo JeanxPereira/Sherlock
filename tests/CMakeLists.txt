@@ -142,9 +142,12 @@ set_tests_properties(Sherlock.BuildDocuments PROPERTIES FIXTURES_SETUP SherlockD
 # Measured 2026-09-18 by `python tests/Sherlock/measure_document_counts.py <repo root>` -- a
 # corpus fact, not a code fact: re-run that command and update these three numbers by hand
 # whenever docs/re, docs/concepts or Source/'s seals grow or shrink enough to move them.
+# BIN_SEALS moved 2144 -> 2207 in this same measurement: WalkSource (and measure_document_counts.py's
+# own walk) now carry the shader extensions (.frag/.vert/.glsl) that SealDump and lint_seals.py
+# already scanned -- the built store was missing every shader seal until this fix.
 set(SHERLOCK_DOCUMENTS_RE_SECTIONS 2713)
 set(SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS 209)
-set(SHERLOCK_DOCUMENTS_BIN_SEALS 2144)
+set(SHERLOCK_DOCUMENTS_BIN_SEALS 2207)
 
 add_test(NAME Sherlock.DocumentsExactCounts
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/DocumentsExactCounts.py
@@ -168,6 +171,14 @@ endfunction()
 # verified directly against the built binary instead (see this task's report).
 sherlock_documents_query_test(QueryCitedBy  q 0x27c198c20 MATCH "cited by.*resolvelayers-recon")
 sherlock_documents_query_test(QuerySealedAt q 0x22695fe48 MATCH "sealed at.*SnippetSizeConstants")
+
+# The shader-seal control: WalkSource's inclusion rule (DocumentIndex::HasSealExtension) must carry
+# .frag/.vert/.glsl into Documents.db, or this seal -- real, decoded, cited by
+# 2026-09-17-siri-wave-archive-renderer-parity.md -- goes missing from the built store while
+# SealDump/DocumentIndexParity.py, which walk the same files directly, keep passing. That is
+# exactly the drift this gate exists to catch: narrow WalkSource's extension list back to
+# .h/.hpp/.cpp and this FAILS with no "sealed at" line for 0x24058bd88 at all.
+sherlock_documents_query_test(QuerySealedAtShader q 0x24058bd88 MATCH "sealed at Source/DesignLibrary/shaders/SiriEffect.frag:4")
 
 # find and laudo themselves, against the same real corpus -- QueryCitedBy/QuerySealedAt above
 # prove q's layer-3 lines; these prove the commands Task 7 exists for.
