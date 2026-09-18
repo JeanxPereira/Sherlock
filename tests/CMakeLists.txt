@@ -121,3 +121,56 @@ add_test(NAME Sherlock.ParityGates
 add_test(NAME Sherlock.FinalFixGates
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/FinalFixGates.py
                 $<TARGET_FILE:Sherlock> ${CMAKE_CURRENT_BINARY_DIR}/FinalFixGateScratch)
+
+# q's two layer-3 blocks (cited by / sealed at) and status's layer-3 line (task 8). The behavior
+# itself is covered corpus-free by DocumentLayerGates below; these ctest entries additionally
+# prove it end to end against the real corpus's own positive controls.
+sherlock_gate(DocumentLayerGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::DyldSharedCache)
+target_sources(SherlockTestDocumentLayerGates PRIVATE
+    ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Queries.cpp)
+target_include_directories(SherlockTestDocumentLayerGates PRIVATE
+    ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/include)
+
+set(SHERLOCK_DOCUMENTS_CORPUS ${CMAKE_CURRENT_BINARY_DIR}/SherlockDocumentsCorpus/Documents.db)
+
+# Pure markdown/source parsing over the real repository -- no cache or Facts store needed, so
+# this is cheap (a few seconds) even though every other query test below depends on it.
+add_test(NAME Sherlock.BuildDocuments
+        COMMAND $<TARGET_FILE:Sherlock> build docs --repo ${SHERLOCK_REPO} --documents ${SHERLOCK_DOCUMENTS_CORPUS})
+set_tests_properties(Sherlock.BuildDocuments PROPERTIES FIXTURES_SETUP SherlockDocuments TIMEOUT 120)
+
+function(sherlock_documents_query_test name)
+    cmake_parse_arguments(ARG "" "MATCH" "" ${ARGN})
+    add_test(NAME Sherlock.${name} COMMAND $<TARGET_FILE:Sherlock> ${ARG_UNPARSED_ARGUMENTS}
+            --cache ${SHERLOCK_CACHE_DIR} --store ${SHERLOCK_STORE_DIR} --documents ${SHERLOCK_DOCUMENTS_CORPUS})
+    set_tests_properties(Sherlock.${name} PROPERTIES
+        FIXTURES_REQUIRED "SherlockStore;SherlockDocuments"
+        PASS_REGULAR_EXPRESSION "${ARG_MATCH}")
+endfunction()
+
+# The Measured Facts table's own positive controls: the DesignLibrary 13-layer table's citations,
+# and the SnippetSizeConstants.h clean BIN-tagged seal. Named like the existing Query* tests, so --
+# like them -- excluded from a run that skips the slow real-corpus facts build (`-E "...|Query|..."`);
+# verified directly against the built binary instead (see this task's report).
+sherlock_documents_query_test(QueryCitedBy  q 0x27c198c20 MATCH "cited by.*resolvelayers-recon")
+sherlock_documents_query_test(QuerySealedAt q 0x22695fe48 MATCH "sealed at.*SnippetSizeConstants")
+
+# Deliberately does NOT require SherlockDocuments, and points --documents at a path that is
+# guaranteed never to exist -- proving decision 4's fallback cannot depend on ctest's run order
+# relative to Sherlock.BuildDocuments, which writes to a fixed, shared path other tests also read.
+add_test(NAME Sherlock.QueryNoDocuments
+        COMMAND $<TARGET_FILE:Sherlock> q 0x240622d98 --cache ${SHERLOCK_CACHE_DIR} --store ${SHERLOCK_STORE_DIR}
+                --documents ${CMAKE_CURRENT_BINARY_DIR}/SherlockDocumentsCorpus/DoesNotExist.db)
+set_tests_properties(Sherlock.QueryNoDocuments PROPERTIES
+        FIXTURES_REQUIRED SherlockStore
+        PASS_REGULAR_EXPRESSION "layer 3: not built")
+
+# status's layer 3, over the real, already-built Facts store and Documents.db. No "Query" in the
+# name, so -- unlike the two tests above -- this DOES run in the reduced ctest pass: it reads the
+# Facts Catalog.db Sherlock.BuildTowers produced once (every session shares that persisted store;
+# this never rebuilds it), so it needs no facts-store fixture of its own.
+add_test(NAME Sherlock.StatusLayerThree
+        COMMAND $<TARGET_FILE:Sherlock> status --store ${SHERLOCK_STORE_DIR} --documents ${SHERLOCK_DOCUMENTS_CORPUS})
+set_tests_properties(Sherlock.StatusLayerThree PROPERTIES
+        FIXTURES_REQUIRED SherlockDocuments
+        PASS_REGULAR_EXPRESSION "changed: [0-9]+, added: [0-9]+, removed: [0-9]+")
