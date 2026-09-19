@@ -232,19 +232,25 @@ namespace Sherlock::HexRaysExport
         std::filesystem::create_directories(options.StoreDir, ec);
         const auto storePath = StorePath(options.StoreDir, options.ImageName);
         std::filesystem::remove(storePath, ec);
-        auto store = Store::Database::Open(storePath, Store::Database::Mode::ReadWrite);
-        if (!store)
         {
-            return std::unexpected(store.error());
+            auto store = Store::Database::Open(storePath, Store::Database::Mode::ReadWrite);
+            if (!store)
+            {
+                return std::unexpected(store.error());
+            }
+            if (auto ok = CreateStore(*store, options.ImagePath, options.Build, report.IdaVersion); !ok)
+            {
+                return std::unexpected(ok.error());
+            }
+            if (auto ok = WriteRows(*store, rows, names); !ok)
+            {
+                return std::unexpected(ok.error());
+            }
         }
-        if (auto ok = CreateStore(*store, options.ImagePath, options.Build, report.IdaVersion); !ok)
-        {
-            return std::unexpected(ok.error());
-        }
-        if (auto ok = WriteRows(*store, rows, names); !ok)
-        {
-            return std::unexpected(ok.error());
-        }
+        // Measured only after the connection closes. Under WAL the rows sit in the -wal file
+        // until a checkpoint, and SQLite checkpoints on its own once that file passes about
+        // 4 MB -- so measuring while the database is open reported the real size for a large
+        // image and 4096 bytes, one empty page, for every store smaller than that.
         report.StoreBytes = std::filesystem::file_size(storePath, ec);
 
         if (!options.KeepDatabase)

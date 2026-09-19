@@ -60,5 +60,14 @@ names, = db.execute("SELECT count(*) FROM IdaName").fetchone()
 if names == 0:
     sys.exit("FAIL: IdaName is empty, so no name reached the store")
 
+# The worker prints store-bytes, and a store measured while its own connection is still open
+# reads 4096 -- one empty page -- for anything under SQLite's WAL autocheckpoint. The number is
+# what a projection of the whole fill is built from, so a size that only happens to be right for
+# large images is a number that lies exactly where it is cheapest to believe.
+on_disk = os.path.getsize(store)
+if on_disk < 64 * 1024:
+    sys.exit(f"FAIL: the store is {on_disk} bytes on disk, which is an empty page, not "
+             f"{ok} decompiled functions")
+
 print(f"OK: {ok}/{total} decompiled, {names} names, control {CONTROL:#x} under {owner[0]:#x}, "
-      f"ida {ida[0]}")
+      f"ida {ida[0]}, {on_disk / 1e6:.2f} MB on disk")
