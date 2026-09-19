@@ -186,6 +186,10 @@ namespace Sherlock::Cli
             {
                 invocation.Resume = true;
             }
+            else if (arg == "--asm")
+            {
+                invocation.Asm = true;
+            }
             else if (arg == "--full")
             {
                 invocation.Full = true;

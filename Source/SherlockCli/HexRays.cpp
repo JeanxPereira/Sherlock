@@ -28,7 +28,8 @@ namespace Sherlock::Cli
         struct Target
         {
             std::string Path;   // the catalog's Image.Path, cache-relative
-            std::string Name;   // the catalog's Image.Name
+            std::string Name;   // the image itself, the last component of Path -- NOT the catalog's
+                                // Image.Name, which is the layer-1 store's file name ("AppKit.db")
             std::string Tower;  // empty when the image belongs to no tower
         };
 
@@ -207,7 +208,8 @@ namespace Sherlock::Cli
                 {
                     break;
                 }
-                Target target {std::string(rows->Text(0)), std::string(rows->Text(1)),
+                const std::string path(rows->Text(0));
+                Target target {path, std::filesystem::path(path).filename().string(),
                                rows->IsNull(2) ? std::string{} : std::string(rows->Text(2))};
                 const std::string state(rows->Text(3));
 

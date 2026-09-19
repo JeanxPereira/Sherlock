@@ -24,6 +24,7 @@ namespace Sherlock::Cli
         std::vector<std::string>     Images;
         bool                         AllTowers = false;
         bool                         Full      = false;
+        bool                         Asm       = false;  // fn only: layer 1's disassembly
         bool                         Json      = false;
         bool                         Resume    = false;
         unsigned                     Workers   = 0;

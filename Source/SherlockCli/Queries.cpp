@@ -4,6 +4,8 @@
 
 #include <DocumentIndex/Builder.h>
 #include <DocumentIndex/FileStamp.h>
+#include <Facts/Disassembler.h>
+#include <HexRaysExport/Store.h>
 #include <Store/Database.h>
 #include <Store/Schema.h>
 
@@ -127,6 +129,23 @@ namespace Sherlock::Cli
             const std::string    owned(text);
             const std::uint64_t  value    = std::strtoull(owned.c_str(), &dummy, 16);
             return dummy != nullptr && *dummy == '\0' ? std::optional<std::uint64_t>(value) : std::nullopt;
+        }
+
+        std::vector<std::string_view> SplitLines(std::string_view text)
+        {
+            std::vector<std::string_view> lines;
+            while (!text.empty())
+            {
+                const auto end = text.find('\n');
+                if (end == std::string_view::npos)
+                {
+                    lines.push_back(text);
+                    break;
+                }
+                lines.push_back(text.substr(0, end));
+                text.remove_prefix(end + 1);
+            }
+            return lines;
         }
 
         void Emit(const QueryEnvironment& env, std::string line)
@@ -856,6 +875,156 @@ namespace Sherlock::Cli
         }
         return {count > 0 ? VerdictKind::Found : VerdictKind::Empty, count, {}, owned->Image.CoverageRead,
                owned->Image.CoverageTotal};
+    }
+
+    Verdict RunFunction(const QueryEnvironment& env, const DyldSharedCache::Cache* cache,
+                        std::uint64_t address, bool disassemble)
+    {
+        auto catalog = Store::Database::Open(env.Store / "Catalog.db", Store::Database::Mode::ReadOnly);
+        if (!catalog)
+        {
+            return {VerdictKind::NotVerified, 0, catalog.error().Format(), 0, 0};
+        }
+        const auto catalogUuid = ValidateCatalog(*catalog);
+        if (!catalogUuid) return {VerdictKind::NotVerified, 0, catalogUuid.error().Format(), 0, 0};
+        const auto rows = LoadImages(*catalog);
+        if (!rows)
+        {
+            return {VerdictKind::NotVerified, 0, rows.error().Format(), 0, 0};
+        }
+
+        std::uint64_t read = 0, total = 0;
+        for (const auto& image : *rows)
+        {
+            if (image.State != "FactsDone")
+            {
+                continue;
+            }
+            auto db = OpenImage(env, image, *catalogUuid);
+            if (!db)
+            {
+                return {VerdictKind::NotVerified, 0, db.error().Format(), read, total};
+            }
+            read += image.CoverageRead;
+            total += image.CoverageTotal;
+
+            // The function that CONTAINS the address, not the one that starts at it: a laudo cites
+            // the address of a field or a call site far more often than a function's first byte.
+            auto enclosing = db->Prepare("SELECT Address, Size FROM Function WHERE Address <= ?1 "
+                                         "ORDER BY Address DESC LIMIT 1");
+            if (!enclosing)
+            {
+                return {VerdictKind::NotVerified, 0, enclosing.error().Format(), read, total};
+            }
+            if (auto bind = enclosing->Bind(1, static_cast<std::int64_t>(address)); !bind)
+            {
+                return {VerdictKind::NotVerified, 0, bind.error().Format(), read, total};
+            }
+            const auto row = enclosing->Step();
+            if (!row)
+            {
+                return {VerdictKind::NotVerified, 0, row.error().Format(), read, total};
+            }
+            if (!*row)
+            {
+                continue;
+            }
+            const auto start = static_cast<std::uint64_t>(enclosing->Int(0));
+            const auto size = static_cast<std::uint64_t>(enclosing->Int(1));
+            if (size == 0 || address >= start + size)
+            {
+                continue;
+            }
+
+            const std::string basename = std::filesystem::path(image.Path).filename().string();
+            Emit(env, std::format("0x{:x} is in 0x{:x} (+0x{:x}), {} bytes, in {}", address, start,
+                                  address - start, size, basename));
+
+            if (disassemble)
+            {
+                if (cache == nullptr)
+                {
+                    return {VerdictKind::NotVerified, 0,
+                            "--asm reads the cache; pass --cache or set SHERLOCK_CACHE", read, total};
+                }
+                auto bytes = cache->Read(start, static_cast<std::size_t>(size));
+                if (!bytes)
+                {
+                    return {VerdictKind::NotVerified, 0, bytes.error().Format(), read, total};
+                }
+                auto disassembler = Facts::Disassembler::Create();
+                if (!disassembler)
+                {
+                    return {VerdictKind::NotVerified, 0, disassembler.error().Format(), read, total};
+                }
+                std::size_t printed = 0;
+                auto coverage = disassembler->Stream(*bytes, start, [&](const Facts::Instruction& one) {
+                    Emit(env, std::format("  0x{:x}  {} {}", one.Address, one.Mnemonic, one.Operands));
+                    ++printed;
+                });
+                if (!coverage)
+                {
+                    return {VerdictKind::NotVerified, 0, coverage.error().Format(), read, total};
+                }
+                Emit(env, std::format("layer 1: {}/{} instruction words decoded", coverage->Decoded,
+                                      coverage->Total));
+                return {VerdictKind::Found, printed, {}, coverage->Decoded, coverage->Total};
+            }
+
+            // basename, not image.Name: the latter is the layer-1 store's file name.
+            const auto storePath = HexRaysExport::StorePath(env.Store / "Images", basename);
+            std::error_code exists;
+            if (!std::filesystem::is_regular_file(storePath, exists))
+            {
+                // The zero rule: layer 2 has nothing here because it was never built for this
+                // image, and the line says which command builds it rather than reporting absence.
+                Emit(env, std::format("layer 2: not built for {} -- build it with: Sherlock build "
+                                      "hexrays --store {} --images {}",
+                                      basename, env.Store.string(), basename));
+                return {VerdictKind::Empty, 0, "layer 2 is not built for this image", read, total};
+            }
+            auto layerTwo = Store::Database::Open(storePath, Store::Database::Mode::ReadOnly);
+            if (!layerTwo)
+            {
+                return {VerdictKind::NotVerified, 0, layerTwo.error().Format(), read, total};
+            }
+            if (auto ok = HexRaysExport::CheckStoreSchema(*layerTwo); !ok)
+            {
+                return {VerdictKind::NotVerified, 0, ok.error().Format(), read, total};
+            }
+            auto coverage = HexRaysExport::ReadCoverage(*layerTwo);
+            const std::uint64_t decompiled = coverage ? coverage->Decompiled : 0;
+            const std::uint64_t attempted = coverage ? coverage->Attempted : 0;
+
+            auto stored = HexRaysExport::ReadFunction(*layerTwo, start);
+            if (!stored)
+            {
+                return {VerdictKind::NotVerified, 0, stored.error().Format(), decompiled, attempted};
+            }
+            if (!*stored)
+            {
+                Emit(env, std::format("layer 2: no row for 0x{:x}", start));
+                return {VerdictKind::Empty, 0, "this function is not in layer 2", decompiled, attempted};
+            }
+            if ((*stored)->State != HexRaysExport::Status::Ok)
+            {
+                Emit(env, std::format("layer 2: {} -- {}",
+                                      HexRaysExport::ToText((*stored)->State), (*stored)->Reason));
+                return {VerdictKind::Empty, 0, "this function did not decompile", decompiled, attempted};
+            }
+
+            // Pseudocode locates; on its own it never closes a decoded value (spec section 6).
+            Emit(env, std::format("layer 2: {} line(s), {:.3f} s, pseudocode locates and does not "
+                                  "close a value", (*stored)->Lines, (*stored)->Seconds));
+            for (const auto& line : SplitLines((*stored)->Pseudocode))
+            {
+                Emit(env, std::string(line));
+            }
+            return {VerdictKind::Found, (*stored)->Lines, {}, decompiled, attempted};
+        }
+
+        Emit(env, std::format("layer 1: no function contains 0x{:x}", address));
+        return {VerdictKind::Empty, 0, "no function contains this address", read, total};
     }
 
     Verdict RunStatus(const QueryEnvironment& env)

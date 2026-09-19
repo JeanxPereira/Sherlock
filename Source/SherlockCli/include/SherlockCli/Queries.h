@@ -38,5 +38,10 @@ namespace Sherlock::Cli
     Verdict RunCalls(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::uint64_t address);
     Verdict RunRefs(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::uint64_t address,
                     std::uint64_t end);
+    // fn: layer 2's pseudocode for the function containing the address, or layer 1's disassembly
+    // with --asm. A cache is needed only for --asm, so the layer-2 path costs no cache open.
+    Verdict RunFunction(const QueryEnvironment& env, const DyldSharedCache::Cache* cache,
+                        std::uint64_t address, bool disassemble);
+
     Verdict RunStatus(const QueryEnvironment& env);
 }

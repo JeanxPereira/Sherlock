@@ -44,7 +44,7 @@ add_test(NAME Sherlock.DocumentIndexParity
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/DocumentIndexParity.py
                 --dump $<TARGET_FILE:SherlockSealDump> --repo ${SHERLOCK_REPO})
 
-sherlock_gate(CliGates LINKS Sherlock::Facts)
+sherlock_gate(CliGates LINKS Sherlock::Facts Sherlock::HexRaysExport)
 target_sources(SherlockTestCliGates PRIVATE
     ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Arguments.cpp
     ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Towers.cpp
@@ -126,7 +126,8 @@ add_test(NAME Sherlock.FinalFixGates
 # q's two layer-3 blocks (cited by / sealed at) and status's layer-3 line (task 8). The behavior
 # itself is covered corpus-free by DocumentLayerGates below; these ctest entries additionally
 # prove it end to end against the real corpus's own positive controls.
-sherlock_gate(DocumentLayerGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::DyldSharedCache)
+# Queries.cpp reads layer 2 and disassembles for --asm, so this target carries both modules.
+sherlock_gate(DocumentLayerGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::DyldSharedCache Sherlock::Facts Sherlock::HexRaysExport)
 target_sources(SherlockTestDocumentLayerGates PRIVATE
     ${SHERLOCK_REPO}/tools/Sherlock/Source/SherlockCli/Queries.cpp)
 target_include_directories(SherlockTestDocumentLayerGates PRIVATE
@@ -258,6 +259,14 @@ if(SHERLOCK_IDA_FOUND)
     set_tests_properties(Sherlock.HexRaysExport PROPERTIES
             FIXTURES_SETUP SherlockHexRays TIMEOUT 3600
             ENVIRONMENT "PATH=${SHERLOCK_IDA_DIR};$ENV{PATH}")
+
+    # `fn` reads both layers, so it needs the facts store AND one exported image.
+    add_test(NAME Sherlock.HexRaysQueryGate
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysQueryGate.py)
+    set_tests_properties(Sherlock.HexRaysQueryGate PROPERTIES
+            FIXTURES_REQUIRED "SherlockStore;SherlockHexRays"
+            TIMEOUT 1800
+            ENVIRONMENT "SHERLOCK_CLI=$<TARGET_FILE:Sherlock>;SHERLOCK_STORE=${SHERLOCK_STORE_DIR};SHERLOCK_CACHE=${SHERLOCK_CACHE_DIR}")
 
     add_test(NAME Sherlock.HexRaysWorkerGate
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysWorkerGate.py)

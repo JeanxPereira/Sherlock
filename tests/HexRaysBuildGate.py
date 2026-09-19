@@ -70,8 +70,11 @@ def make_catalog(store: Path, images) -> None:
                    [("Kind", "Catalog"), ("SchemaVersion", "1"), ("Build", "26A5416b"),
                     ("CacheUuid", "gate")])
     for name, state in images:
+        # Image.Name is the layer-1 STORE's file name, with its .db, and the image itself is the
+        # last component of Image.Path. The fixture carries that shape, because a fixture that
+        # calls them the same thing hides every defect that confuses the two.
         db.execute("INSERT OR REPLACE INTO Image VALUES(?,?,?,?,?,NULL,'gate',NULL)",
-                   (f"/usr/lib/{name}", name, "Gate", 0, state))
+                   (f"/usr/lib/{name}", f"{name}.db", "Gate", 0, state))
     db.commit()
     db.close()
 
@@ -86,7 +89,7 @@ def run(store: Path, images_dir: Path, worker: Path, extra):
 
 def state_of(store: Path, name: str):
     db = sqlite3.connect(store / "Catalog.db")
-    row = db.execute("SELECT State, Reason FROM Image WHERE Name = ?", (name,)).fetchone()
+    row = db.execute("SELECT State, Reason FROM Image WHERE Name = ?", (name + ".db",)).fetchone()
     db.close()
     return row
 
