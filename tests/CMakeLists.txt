@@ -260,6 +260,12 @@ if(SHERLOCK_IDA_FOUND)
             FIXTURES_SETUP SherlockHexRays TIMEOUT 3600
             ENVIRONMENT "PATH=${SHERLOCK_IDA_DIR};$ENV{PATH}")
 
+    add_test(NAME Sherlock.HexRaysLeftover
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysLeftoverGate.py)
+    set_tests_properties(Sherlock.HexRaysLeftover PROPERTIES
+            ENVIRONMENT "SHERLOCK_HEXRAYS_WORKER=$<TARGET_FILE:SherlockHexRays>;SHERLOCK_IDA_DIR=${SHERLOCK_IDA_DIR}"
+            TIMEOUT 600)
+
     # `fn` reads both layers, so it needs the facts store AND one exported image.
     add_test(NAME Sherlock.HexRaysQueryGate
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysQueryGate.py)

@@ -16,6 +16,8 @@
 #include <hexrays.hpp>
 
 #include <chrono>
+
+#include <windows.h>
 #include <format>
 #include <vector>
 
@@ -39,20 +41,39 @@ namespace Sherlock::HexRaysExport
             return std::format("{}.{}.{}", major, minor, build);
         }
 
-        // IDA writes its database next to the input. An unpacked database -- the .id0 and friends
-        // beside the image -- means a GUI or another process holds it open, and opening it here
-        // would fight that session for the same files.
-        bool DatabaseIsHeldOpen(const std::filesystem::path& image)
+        enum class Unpacked
+        {
+            None,      // no unpacked database beside the image
+            HeldOpen,  // a live process has it: opening it here would fight that session
+            LeftBehind // a dead run's debris: nobody holds it, and IDA will not resume from it
+        };
+
+        // IDA writes its database next to the input, and an interrupted run leaves that database
+        // unpacked. The files alone cannot tell a live session from debris, and the two need
+        // opposite answers -- one is "wait for the human", the other is "delete these and rerun".
+        // What tells them apart is whether the .id0 can be opened for exclusive write.
+        Unpacked UnpackedDatabase(const std::filesystem::path& image, std::filesystem::path& witness)
         {
             for (const char* extension : {".id0", ".id1", ".id2", ".nam", ".til"})
             {
                 std::error_code ec;
-                if (std::filesystem::exists(std::filesystem::path(image).replace_extension(extension), ec))
+                const auto candidate = std::filesystem::path(image).replace_extension(extension);
+                if (!std::filesystem::exists(candidate, ec))
                 {
-                    return true;
+                    continue;
                 }
+                witness = candidate;
+                HANDLE handle = CreateFileW(candidate.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (handle == INVALID_HANDLE_VALUE)
+                {
+                    return GetLastError() == ERROR_SHARING_VIOLATION ? Unpacked::HeldOpen
+                                                                     : Unpacked::LeftBehind;
+                }
+                CloseHandle(handle);
+                return Unpacked::LeftBehind;
             }
-            return false;
+            return Unpacked::None;
         }
 
         // Hex-Rays lines carry IDA's own colour tags. The stored text is what `fn` prints, so the
@@ -91,11 +112,22 @@ namespace Sherlock::HexRaysExport
                         options.Image.string(), "the image is not a file",
                         "extract the image into the corpus before exporting it");
         }
-        if (DatabaseIsHeldOpen(options.Image))
+        std::filesystem::path witness;
+        switch (UnpackedDatabase(options.Image, witness))
         {
+        case Unpacked::HeldOpen:
             return Fail(DiagnosticCode::Io, Severity::NotVerified, "HexRaysExport::RunWorker",
-                        options.Image.string(), "an unpacked IDA database sits beside this image",
+                        options.Image.string(),
+                        std::format("a live process holds {}", witness.filename().string()),
                         "close the IDA session holding it, or export a copy of the image");
+        case Unpacked::LeftBehind:
+            return Fail(DiagnosticCode::Io, Severity::NotVerified, "HexRaysExport::RunWorker",
+                        options.Image.string(),
+                        std::format("an interrupted run left {} behind and nothing holds it",
+                                    witness.filename().string()),
+                        "delete the .id0/.id1/.nam/.til beside the image and run this again");
+        case Unpacked::None:
+            break;
         }
 
         WorkerReport report;
