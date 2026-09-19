@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Sherlock -- tests/Sherlock/HexRaysProjection.py
-# The five-image gate: what layer 2 costs per byte of binary and per function, and what those two
+# The phase-3 gate: what layer 2 costs per byte of binary and per function, and what those two
 # rates project over the whole cache. Phase 4 starts only after a person reads this.
 #
 # It measures, it does not decide. A projection that refuses phase 4 -- because the pseudocode
@@ -19,6 +19,11 @@ from pathlib import Path
 
 SAMPLED_RATE = 0.013  # s/function, the earlier session's random sample of DesignLibrary
 GIB = 1024.0 ** 3
+
+# The spec names five tower images. Running on fewer is a deliberate, recorded reduction, never a
+# default: SHERLOCK_MIN_IMAGES has to be lowered by hand, and the report says on its face how many
+# images its rates come from and which of the five are absent.
+SPEC_IMAGES = ["DesignLibrary", "ContactsUICore", "QuartzCore", "SwiftUICore", "AppKit"]
 
 store = Path(os.environ["SHERLOCK_STORE"]) / "Images"
 cache_dir = Path(os.environ["SHERLOCK_CACHE"])
@@ -49,10 +54,13 @@ for db_path in sorted(store.glob("*.HexRays.db")):
         "ida": ida[0] if ida else "unknown",
     })
 
-if len(rows) < 5:
-    print(f"NOT VERIFIED: {len(rows)} image(s) exported, and this gate reads five. Export the rest "
-          f"with: Sherlock build hexrays --towers --resume --store {store.parent}")
+minimum = int(os.environ.get("SHERLOCK_MIN_IMAGES", "5"))
+if len(rows) < minimum:
+    print(f"NOT VERIFIED: {len(rows)} image(s) exported, and this gate reads {minimum}. Export the "
+          f"rest with: Sherlock build hexrays --towers --resume --store {store.parent}")
     sys.exit(2)
+
+absent = [name for name in SPEC_IMAGES if name not in {r["name"] for r in rows}]
 
 # Every byte of the cache is a byte layer 2 would have to read, so the cache's own size is what
 # the two rates scale by.
@@ -80,7 +88,11 @@ except OSError:
     pass
 
 out = []
-out.append("Sherlock layer 2 -- the five-image gate")
+out.append(f"Sherlock layer 2 -- the phase-3 gate, from {len(rows)} image(s)")
+if absent:
+    out.append(f"REDUCED: the spec names five, and {', '.join(absent)} are absent. Every rate below "
+               f"comes from the images that are here, and the projection is only as good as they "
+               f"represent the cache.")
 out.append("")
 out.append(f"{'image':<18}{'image MB':>10}{'store MB':>10}{'B/B':>7}{'functions':>11}"
            f"{'decompiled':>12}{'s/function':>12}")
@@ -105,6 +117,9 @@ if free_bytes:
 out.append("")
 out.append(f"against the earlier random sample of {SAMPLED_RATE} s/function: this whole-image rate "
            f"is {seconds_per_function / SAMPLED_RATE:.1f}x it")
+if absent:
+    out.append(f"absent from this projection: {', '.join(absent)} -- the largest images of the five, "
+               f"so the analysis time and the memory a large image needs are NOT in these numbers.")
 out.append("Read this before starting phase 4. The gate measures; the decision is a person's.")
 
 text = "\n".join(out)
@@ -120,4 +135,4 @@ if not (0.1 <= seconds_per_function / SAMPLED_RATE <= 10.0):
     sys.exit(f"FAIL: {seconds_per_function:.4f} s/function is off the earlier {SAMPLED_RATE} by more "
              f"than an order of magnitude, so one of the two measured the wrong thing")
 if decompiled == 0:
-    sys.exit("FAIL: no function decompiled across five images")
+    sys.exit("FAIL: no function decompiled across the images read")
