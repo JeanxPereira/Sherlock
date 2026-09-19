@@ -70,3 +70,12 @@ address layer 2 does not cover prints the `build hexrays` command that would cov
 
 **Pseudocode locates.** It never closes a decoded value on its own: that needs a layer-1 reading
 or an instrument that prints coverage, and `lint_instruments.py` enforces it.
+
+**A call that leaves the image has no name in layer 2.** The worker decompiles an image carved out
+of the cache, and a carved slice does not contain what lies between the images -- the point
+`References/scripts/dsc_reader.py` exists to make. So a cross-image call reads as `MEMORY[0x...]`,
+and the pseudocode of `-[_DLPocketLayerDelegate actionForLayer:forKey:]` shows five of them where
+layer 1 records five calls leaving DesignLibrary. Layer 1 read the WHOLE cache and has those
+targets: `fn` states how many a function has and names `Sherlock calls <address>`, which resolves
+them. The gap is in the slice, not in the store, and nothing in layer 2 can close it -- reading
+the two layers together is the answer, and `fn` says so on its face.

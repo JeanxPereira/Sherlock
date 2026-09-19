@@ -148,6 +148,35 @@ namespace Sherlock::Cli
             return lines;
         }
 
+        // A call whose target falls in no segment of this image leaves the image. Layer 2's
+        // pseudocode cannot name those -- the slice IDA decompiled does not contain them -- and
+        // layer 1, which read the whole cache, can.
+        Foundation::Expected<std::int64_t> CallsLeavingImage(Store::Database& db, std::uint64_t start,
+                                                             std::uint64_t end)
+        {
+            auto statement = db.Prepare(
+                "SELECT count(*) FROM Call c WHERE c.Site >= ?1 AND c.Site < ?2 AND NOT EXISTS "
+                "(SELECT 1 FROM Segment s WHERE c.Target >= s.Address AND c.Target < s.Address + s.Size)");
+            if (!statement)
+            {
+                return std::unexpected(statement.error());
+            }
+            if (auto ok = statement->Bind(1, static_cast<std::int64_t>(start)); !ok)
+            {
+                return std::unexpected(ok.error());
+            }
+            if (auto ok = statement->Bind(2, static_cast<std::int64_t>(end)); !ok)
+            {
+                return std::unexpected(ok.error());
+            }
+            const auto row = statement->Step();
+            if (!row)
+            {
+                return std::unexpected(row.error());
+            }
+            return *row ? statement->Int(0) : 0;
+        }
+
         void Emit(const QueryEnvironment& env, std::string line)
         {
             if (env.Output != nullptr) env.Output->push_back(line);
@@ -1016,6 +1045,17 @@ namespace Sherlock::Cli
             // Pseudocode locates; on its own it never closes a decoded value (spec section 6).
             Emit(env, std::format("layer 2: {} line(s), {:.3f} s, pseudocode locates and does not "
                                   "close a value", (*stored)->Lines, (*stored)->Seconds));
+
+            // The carved slice loses every target outside the image, so those calls print as
+            // MEMORY[0x...]. Saying how many, and which command resolves them, is the difference
+            // between a reader knowing the gap is there and reading an unresolved address as an
+            // unknown one.
+            if (auto leaving = CallsLeavingImage(*db, start, start + size); leaving && *leaving > 0)
+            {
+                Emit(env, std::format("layer 2: {} call(s) leave {} and read as MEMORY[0x...]; "
+                                      "layer 1 has their targets -- Sherlock calls 0x{:x}",
+                                      *leaving, basename, start));
+            }
             for (const auto& line : SplitLines((*stored)->Pseudocode))
             {
                 Emit(env, std::string(line));

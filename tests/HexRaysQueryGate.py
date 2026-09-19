@@ -88,6 +88,41 @@ if without_layer_two:
 else:
     print("note: every image carries a layer-2 store, so case 3 had nothing to read")
 
+# 3b. Layer 2 is decompiled from an image carved out of the cache, so a call leaving the image
+# reads as MEMORY[0x...] with no name. Layer 1 knows those targets. A reader who is not told
+# reads an unresolved address as an unknown one, so `fn` states the count and names the command --
+# and the command has to actually answer, or the line is worse than silence.
+crossing = None
+db = sqlite3.connect(f"file:{store / 'Images' / (basename + '.db')}?mode=ro", uri=True)
+row = db.execute(
+    "SELECT c.Site, count(*) FROM Call c WHERE NOT EXISTS "
+    "(SELECT 1 FROM Segment s WHERE c.Target >= s.Address AND c.Target < s.Address + s.Size) "
+    "GROUP BY c.Site LIMIT 1").fetchone()
+db.close()
+if row:
+    # The function containing that call site, from the same resolution `fn` performs.
+    db = sqlite3.connect(f"file:{store / 'Images' / (basename + '.db')}?mode=ro", uri=True)
+    owner = db.execute("SELECT Address FROM Function WHERE Address <= ? ORDER BY Address DESC LIMIT 1",
+                       (row[0],)).fetchone()
+    db.close()
+    crossing = owner[0] if owner else None
+
+if crossing is None:
+    print("note: no call leaves this image, so the cross-image line had nothing to state")
+else:
+    out = run([hex(crossing)])
+    if "leave" not in out.stdout:
+        failures.append(f"3b: fn {crossing:#x} contains a call leaving the image and said nothing "
+                        f"about it: {out.stdout[:400]!r}")
+    if "Sherlock calls" not in out.stdout:
+        failures.append("3b: fn reported calls leaving the image without naming the command that "
+                        "resolves them")
+    # The named command must answer, or fn is sending the reader nowhere.
+    resolved = subprocess.run([sherlock, "calls", hex(crossing), "--store", str(store),
+                               "--cache", cache], capture_output=True, text=True, timeout=900)
+    if "via" not in resolved.stdout:
+        failures.append(f"3b: the command fn names resolved nothing: {resolved.stdout[:400]!r}")
+
 # 4. --json carries the same answer, coverage included.
 raw = run([hex(address), "--json"])
 try:
