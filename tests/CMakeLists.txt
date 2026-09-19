@@ -235,4 +235,25 @@ if(SHERLOCK_IDA_FOUND)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysSdkRefusalGate.py)
     set_tests_properties(Sherlock.HexRaysSdkRefusal PROPERTIES ENVIRONMENT
             "CMAKE_COMMAND=${CMAKE_COMMAND};SHERLOCK_IDA_SDK_MODULE=${SHERLOCK_REPO}/tools/Sherlock/cmake/SherlockIdaSdk.cmake;SHERLOCK_IDA_DIR=${SHERLOCK_IDA_DIR};SHERLOCK_IDA_API=${SHERLOCK_IDA_API}")
+
+    # Sherlock.HexRaysExport decompiles one real image once, the way Sherlock.BuildTowers fills the
+    # facts store once: --resume makes every later run read the store instead of paying the
+    # minutes again, and the gate below only reads what it left. The worker needs IDA's DLLs on
+    # PATH, since its imports resolve at process start.
+    add_test(NAME Sherlock.HexRaysExport
+            COMMAND $<TARGET_FILE:SherlockHexRays>
+                    --image ${SHERLOCK_CORPUS}/${SHERLOCK_BUILD}/extracted/dylibs/DesignLibrary
+                    --store ${SHERLOCK_STORE_DIR}/Images
+                    --name DesignLibrary
+                    --image-path /System/Library/PrivateFrameworks/DesignLibrary.framework/Versions/A/DesignLibrary
+                    --build ${SHERLOCK_BUILD} --keep-database --resume)
+    set_tests_properties(Sherlock.HexRaysExport PROPERTIES
+            FIXTURES_SETUP SherlockHexRays TIMEOUT 3600
+            ENVIRONMENT "PATH=${SHERLOCK_IDA_DIR};$ENV{PATH}")
+
+    add_test(NAME Sherlock.HexRaysWorkerGate
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysWorkerGate.py)
+    set_tests_properties(Sherlock.HexRaysWorkerGate PROPERTIES
+            FIXTURES_REQUIRED SherlockHexRays
+            ENVIRONMENT "SHERLOCK_STORE=${SHERLOCK_STORE_DIR}")
 endif()

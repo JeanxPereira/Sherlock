@@ -3,6 +3,13 @@
 cmake_minimum_required(VERSION 3.28)
 project(Sherlock VERSION 0.1.0 LANGUAGES C CXX)
 
+# IDA's import libraries and DLLs are built against the release CRT, and the layer-2 worker
+# links them. Two CRTs in one binary do not link, so every target in this directory -- the
+# modules, the fetched dependencies and the gates -- uses the release CRT in every
+# configuration. The price is that Sherlock's Debug build has no debug heap; the alternative is
+# that layer 2 cannot link at all. It must be set before any target is created.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/SherlockDependencies.cmake)
 
 function(sherlock_compile_options target)
@@ -65,15 +72,13 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/SherlockIdaSdk.cmake)
 # Layer 2 is a separate executable: the IDA SDK never enters the Sherlock binary's link line,
 # so a clone without IDA builds everything else and every layer-1 and layer-3 command works.
 if(SHERLOCK_IDA_FOUND)
-    add_executable(SherlockHexRays ${S}/HexRaysExport/WorkerMain.cpp)
+    add_executable(SherlockHexRays ${S}/HexRaysExport/WorkerMain.cpp ${S}/HexRaysExport/Worker.cpp)
     target_include_directories(SherlockHexRays PRIVATE ${SHERLOCK_IDA_SDK}/include)
     target_link_libraries(SherlockHexRays PRIVATE
+        Sherlock::HexRaysExport
         ${SHERLOCK_IDA_SDK}/lib/x64_win_vc_64/ida.lib
         ${SHERLOCK_IDA_SDK}/lib/x64_win_vc_64/idalib.lib)
     target_compile_definitions(SherlockHexRays PRIVATE __NT__ __EA64__)
-    # IDA's import libraries and DLLs are built against the release CRT; a Debug configuration
-    # would otherwise hand this target /MDd and two heaps.
-    set_target_properties(SherlockHexRays PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
     sherlock_compile_options(SherlockHexRays)
     # The SDK headers are not clean under /W4 /permissive-, and they are not ours to fix.
     if(MSVC)
