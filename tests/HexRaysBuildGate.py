@@ -24,7 +24,15 @@ python = sys.executable
 STUB = '''import sqlite3, sys
 args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
 mode = "''{mode}''"
+import time
 open(args["--store"] + "/stub.log", "a", encoding="utf-8").write(args["--name"] + " ")
+span = open(args["--store"] + "/span-" + args["--name"] + ".log", "w", encoding="utf-8")
+start = time.time()
+span.write(f"{args['--name']} start {start:.3f}\\n")
+span.flush()
+time.sleep(0.6)  # long enough for a second worker to overlap if the scheduler lets it
+span.write(f"{args['--name']} stop {time.time():.3f}\\n")
+span.close()
 if mode == "fail":
     print("stub: refusing this image")
     sys.exit(1)
@@ -175,6 +183,42 @@ with tempfile.TemporaryDirectory() as tmp:
         if state == "HexRaysRunning":
             failures.append(f"4: {name} still reads HexRaysRunning after a --resume run that "
                             f"stopped at the floor, so the catalog claims a worker is on it")
+
+    # 5. A large image runs with nothing beside it. Memory, not the licence, is what bounds layer
+    # 2's concurrency: IDA's analysis of a large image passes a gigabyte, and two of them at once
+    # push this machine into swap, which is slower than running them in series.
+    store = root / "schedule"
+    make_catalog(store, [("Big", "Pending"), ("Small1", "Pending"), ("Small2", "Pending")])
+    big = images / "Big"
+    big.write_bytes(b"x" * (30 * 1024 * 1024))     # over the large-image threshold
+    (images / "Small1").write_bytes(b"x" * 1024)
+    (images / "Small2").write_bytes(b"x" * 1024)
+
+    env = dict(os.environ)
+    env["SHERLOCK_HEXRAYS_WORKER"] = str(ok_worker)
+    out = subprocess.run([sherlock, "build", "hexrays", "--store", str(store),
+                          "--images-dir", str(images), "--workers", "3",
+                          "--large-image-bytes", str(20 * 1024 * 1024),
+                          "--min-free-memory", "0"],
+                         capture_output=True, text=True, env=env, timeout=600)
+    print(out.stdout, out.stderr)
+
+    spans = {}
+    for span_file in (store / "Images").glob("span-*.log"):
+        for line in span_file.read_text(encoding="utf-8").splitlines():
+            name, kind, when = line.split()
+            spans.setdefault(name, {})[kind] = float(when)
+    if len(spans) != 3:
+        failures.append(f"5: {len(spans)} image(s) ran, expected 3")
+    else:
+        def overlaps(a, b):
+            return spans[a]["start"] < spans[b]["stop"] and spans[b]["start"] < spans[a]["stop"]
+        if overlaps("Big", "Small1") or overlaps("Big", "Small2"):
+            failures.append("5: the large image ran beside another worker, which is the case that "
+                            "pushes the machine into swap")
+        if not overlaps("Small1", "Small2"):
+            failures.append("5: two small images did not overlap, so --workers 3 bought nothing "
+                            "and the scheduler is just running in series")
 
 if failures:
     for failure in failures:

@@ -159,6 +159,22 @@ namespace Sherlock::Cli
                 invocation.Documents = *v;
                 documentsExplicit = true;
             }
+            else if (arg == "--min-free-memory")
+            {
+                const auto v = next();
+                if (!v) return std::unexpected(v.error());
+                const auto bytes = ParseUnsigned<std::uint64_t>(*v, 10, arg);
+                if (!bytes) return std::unexpected(bytes.error());
+                invocation.MinimumFreeMemoryBytes = *bytes;
+            }
+            else if (arg == "--large-image-bytes")
+            {
+                const auto v = next();
+                if (!v) return std::unexpected(v.error());
+                const auto bytes = ParseUnsigned<std::uint64_t>(*v, 10, arg);
+                if (!bytes) return std::unexpected(bytes.error());
+                invocation.LargeImageBytes = *bytes;
+            }
             else if (arg == "--images-dir")
             {
                 const auto v = next();

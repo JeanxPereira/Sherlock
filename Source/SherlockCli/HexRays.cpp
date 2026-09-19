@@ -11,6 +11,7 @@
 #include <Store/Schema.h>
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -25,12 +26,18 @@ namespace Sherlock::Cli
 {
     namespace
     {
+        // IDA's analysis working set against the image's size, rounded up from the measured runs:
+        // the 5.2 MB ContactsUICore peaked near 0.8 GB and the 7.1 MB QuartzCore near 1.0 GB.
+        constexpr std::uintmax_t kMemoryPerImageByte = 150;
+
         struct Target
         {
-            std::string Path;   // the catalog's Image.Path, cache-relative
-            std::string Name;   // the image itself, the last component of Path -- NOT the catalog's
-                                // Image.Name, which is the layer-1 store's file name ("AppKit.db")
-            std::string Tower;  // empty when the image belongs to no tower
+            std::string    Path;   // the catalog's Image.Path, cache-relative
+            std::string    Name;   // the image itself, the last component of Path -- NOT the catalog's
+                                   // Image.Name, which is the layer-1 store's file name ("AppKit.db")
+            std::string    Tower;  // empty when the image belongs to no tower
+            std::uintmax_t Bytes = 0;  // of the extracted image, and the only predictor of the
+                                       // memory IDA's analysis will want
         };
 
         std::filesystem::path WorkerPath()
@@ -49,6 +56,12 @@ namespace Sherlock::Cli
                 return {};
             }
             return std::filesystem::path(std::wstring(buffer, length)).parent_path() / "SherlockHexRays.exe";
+        }
+
+        std::uintmax_t FreePhysicalBytes()
+        {
+            MEMORYSTATUSEX status { sizeof(status) };
+            return GlobalMemoryStatusEx(&status) ? status.ullAvailPhys : 0;
         }
 
         std::uintmax_t FreeBytes(const std::filesystem::path& directory)
@@ -193,6 +206,7 @@ namespace Sherlock::Cli
         {
             auto rows = catalog->Prepare("SELECT Path, Name, Tower, State FROM Image "
                                          "ORDER BY Tower IS NULL, Tower, Name");
+            // Towers first, per section 7; within them the order is refined by size below.
             if (!rows)
             {
                 return NotVerified(rows.error().Format());
@@ -226,9 +240,20 @@ namespace Sherlock::Cli
                 {
                     continue;
                 }
+                std::error_code sizeError;
+                target.Bytes = std::filesystem::file_size(imagesDir / target.Name, sizeError);
+                if (sizeError)
+                {
+                    target.Bytes = 0;
+                }
                 targets.push_back(std::move(target));
             }
         }
+
+        // Largest first among the selected: a large image runs with nothing beside it, so starting
+        // one late leaves every other worker idle while it finishes alone.
+        std::stable_sort(targets.begin(), targets.end(),
+                         [](const Target& a, const Target& b) { return a.Bytes > b.Bytes; });
 
         if (targets.empty())
         {
@@ -242,8 +267,10 @@ namespace Sherlock::Cli
 
         std::mutex catalogLock;  // Catalog.db has exactly one writer, and this is it.
         std::mutex queueLock;
-        std::size_t next = 0, done = 0, failed = 0, missing = 0;
+        std::condition_variable_any waiting;  // a finished worker frees the memory the next needs
+        std::size_t next = 0, done = 0, failed = 0, missing = 0, running = 0;
         bool floorHit = false;
+        bool largeRunning = false;  // a large image holds the machine alone until it finishes
 
         const auto setState = [&](const Target& target, std::string_view state, std::string_view reason)
         {
@@ -282,8 +309,10 @@ namespace Sherlock::Cli
             for (;;)
             {
                 Target target;
+                for (;;)
                 {
-                    std::scoped_lock guard(queueLock);
+                    // unique_lock, not scoped_lock: the wait below has to release this mutex.
+                    std::unique_lock guard(queueLock);
                     if (floorHit || next >= targets.size())
                     {
                         return;
@@ -295,7 +324,40 @@ namespace Sherlock::Cli
                         floorHit = true;
                         return;
                     }
+
+                    // What bounds concurrency here is memory, not the licence and not the core
+                    // count: IDA's analysis of a large image passes a gigabyte, and a machine
+                    // pushed under its own floor swaps -- which is slower than running in series
+                    // and, measured on this one, gets the process killed outright. A large image
+                    // therefore runs ALONE, and any image waits for the free memory its size
+                    // predicts.
+                    const bool large = targets[next].Bytes >= invocation.LargeImageBytes;
+                    const std::uintmax_t wanted =
+                        invocation.MinimumFreeMemoryBytes
+                        + (large ? 0 : targets[next].Bytes * kMemoryPerImageByte);
+                    const bool roomInMemory = invocation.MinimumFreeMemoryBytes == 0
+                                              || FreePhysicalBytes() >= wanted;
+
+                    if ((large && running > 0) || largeRunning || !roomInMemory)
+                    {
+                        // Another worker is running; when it finishes this one looks again. With
+                        // nothing else running there is nothing to wait for, so the image starts
+                        // regardless -- one worker at a time is the floor of this scheduler, never
+                        // a deadlock.
+                        if (running == 0)
+                        {
+                            largeRunning = large;
+                            target = targets[next++];
+                            ++running;
+                            break;
+                        }
+                        waiting.wait(guard);
+                        continue;
+                    }
+                    largeRunning = large;
                     target = targets[next++];
+                    ++running;
+                    break;
                 }
 
                 const auto image = imagesDir / target.Name;
@@ -305,8 +367,13 @@ namespace Sherlock::Cli
                     // Layer 2 reads a file, and the cache holds images nobody extracted. The row
                     // names the one that is missing instead of the run stopping on it.
                     setState(target, "HexRaysFailed", std::format("no extracted image at {}", image.string()));
-                    std::scoped_lock guard(queueLock);
-                    ++missing;
+                    {
+                        std::scoped_lock guard(queueLock);
+                        ++missing;
+                        --running;
+                        largeRunning = false;
+                    }
+                    waiting.notify_all();
                     continue;
                 }
 
@@ -328,16 +395,26 @@ namespace Sherlock::Cli
                     }
                     setState(target, "HexRaysDone", {});
                     setCoverage(target, read, total);
-                    std::scoped_lock guard(queueLock);
-                    ++done;
+                    {
+                        std::scoped_lock guard(queueLock);
+                        ++done;
+                        --running;
+                        largeRunning = false;
+                    }
+                    waiting.notify_all();
                 }
                 else
                 {
                     setState(target, "HexRaysFailed",
                              code == 2 ? "the worker could not look (exit 2); its own line says why"
                                        : "the worker failed on this image (exit 1); its own line says why");
-                    std::scoped_lock guard(queueLock);
-                    ++failed;
+                    {
+                        std::scoped_lock guard(queueLock);
+                        ++failed;
+                        --running;
+                        largeRunning = false;
+                    }
+                    waiting.notify_all();
                 }
             }
         };
