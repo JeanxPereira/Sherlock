@@ -268,6 +268,18 @@ if(SHERLOCK_IDA_FOUND)
             TIMEOUT 1800
             ENVIRONMENT "SHERLOCK_CLI=$<TARGET_FILE:Sherlock>;SHERLOCK_STORE=${SHERLOCK_STORE_DIR};SHERLOCK_CACHE=${SHERLOCK_CACHE_DIR}")
 
+    # HexRaysProjection.py is the phase-3 gate and NOT a ctest entry, the way SealDump is not:
+    # it needs five exported images and its verdict is read by a person, not by an exit code in a
+    # suite. Run it by hand once the export is done:
+    #
+    #   $env:SHERLOCK_STORE="<corpus>/<build>/Sherlock"
+    #   $env:SHERLOCK_CACHE="<corpus>/<build>/dsc/<build>__MacOS"
+    #   $env:SHERLOCK_CORPUS_DYLIBS="<corpus>/<build>/extracted/dylibs"
+    #   python tests/Sherlock/HexRaysProjection.py
+    #
+    # It exits 2 while fewer than five images are exported, which is the honest answer to being
+    # asked for a projection that cannot yet be made.
+
     add_test(NAME Sherlock.HexRaysWorkerGate
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysWorkerGate.py)
     set_tests_properties(Sherlock.HexRaysWorkerGate PROPERTIES
