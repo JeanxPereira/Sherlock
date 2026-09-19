@@ -112,6 +112,14 @@ namespace Sherlock::Cli
             invocation.Documents = env;
             documentsExplicit = true;
         }
+        if (const char* env = std::getenv("SHERLOCK_IMAGES"); env != nullptr)
+        {
+            invocation.ImagesDir = env;
+        }
+        if (const char* env = std::getenv("SHERLOCK_IDA_DIR"); env != nullptr)
+        {
+            invocation.IdaDir = env;
+        }
         invocation.Towers = DefaultTowersPath();
 
         for (std::size_t i = 1; i < args.size(); ++i)
@@ -150,6 +158,18 @@ namespace Sherlock::Cli
                 if (!v) return std::unexpected(v.error());
                 invocation.Documents = *v;
                 documentsExplicit = true;
+            }
+            else if (arg == "--images-dir")
+            {
+                const auto v = next();
+                if (!v) return std::unexpected(v.error());
+                invocation.ImagesDir = *v;
+            }
+            else if (arg == "--ida-dir")
+            {
+                const auto v = next();
+                if (!v) return std::unexpected(v.error());
+                invocation.IdaDir = *v;
             }
             else if (arg == "--towers")
             {

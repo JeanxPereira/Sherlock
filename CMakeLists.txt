@@ -93,9 +93,10 @@ add_executable(Sherlock
     ${S}/SherlockCli/Demangler.cpp
     ${S}/SherlockCli/Verdict.cpp
     ${S}/SherlockCli/Queries.cpp
-    ${S}/SherlockCli/Documents.cpp)
+    ${S}/SherlockCli/Documents.cpp
+    ${S}/SherlockCli/HexRays.cpp)
 target_include_directories(Sherlock PRIVATE ${S}/SherlockCli/include)
-target_link_libraries(Sherlock PRIVATE Sherlock::Facts Sherlock::DocumentIndex nlohmann_json::nlohmann_json Psapi)
+target_link_libraries(Sherlock PRIVATE Sherlock::Facts Sherlock::DocumentIndex Sherlock::HexRaysExport nlohmann_json::nlohmann_json Psapi)
 sherlock_compile_options(Sherlock)
 
 option(SHERLOCK_BUILD_TESTS "Builds Sherlock's gates" ON)

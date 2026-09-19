@@ -220,6 +220,14 @@ set_tests_properties(Sherlock.StatusLayerThree PROPERTIES
         FIXTURES_REQUIRED SherlockDocuments
         PASS_REGULAR_EXPRESSION "changed: [0-9]+, added: [0-9]+, removed: [0-9]+")
 
+# The parent of `build hexrays` is driven with a stand-in worker, so its three behaviours -- the
+# resume reset, a failed image, the free-space floor -- are gated on every machine, with or
+# without IDA.
+add_test(NAME Sherlock.HexRaysBuildGate
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysBuildGate.py)
+set_tests_properties(Sherlock.HexRaysBuildGate PROPERTIES
+        ENVIRONMENT "SHERLOCK_CLI=$<TARGET_FILE:Sherlock>" TIMEOUT 600)
+
 # Layer 2's gates exist only where an SDK matching the installed decompiler was found: the
 # worker target does not exist otherwise, and a gate over a target that was never built would
 # report the absence of IDA as a defect in Sherlock.

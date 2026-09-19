@@ -6,6 +6,7 @@
 #include <SherlockCli/Arguments.h>
 #include <SherlockCli/Demangler.h>
 #include <SherlockCli/Documents.h>
+#include <SherlockCli/HexRays.h>
 #include <SherlockCli/Queries.h>
 #include <SherlockCli/Towers.h>
 
@@ -216,6 +217,13 @@ int main(int argc, char** argv)
     if (invocation->Command == "build" && !invocation->Positional.empty() && invocation->Positional.front() == "docs")
     {
         return RunBuildDocs(*invocation);
+    }
+    if (invocation->Command == "build" && !invocation->Positional.empty() &&
+        invocation->Positional.front() == "hexrays")
+    {
+        const auto result = Cli::BuildHexRays(*invocation);
+        PrintVerdict(result.Report, invocation->Json);
+        return result.ExitCode;
     }
 
     const bool factsQuery = invocation->Command == "q" || invocation->Command == "callers" ||
