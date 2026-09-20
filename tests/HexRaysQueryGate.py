@@ -7,6 +7,7 @@
 # rather than a particular function surviving in a particular build.
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -89,9 +90,13 @@ else:
     print("note: every image carries a layer-2 store, so case 3 had nothing to read")
 
 # 3b. Layer 2 is decompiled from an image carved out of the cache, so a call leaving the image
-# reads as MEMORY[0x...] with no name. Layer 1 knows those targets. A reader who is not told
-# reads an unresolved address as an unknown one, so `fn` states the count and names the command --
-# and the command has to actually answer, or the line is worse than silence.
+# reads as MEMORY[<island>] with no name. Layer 1 read the WHOLE cache and stored that island
+# beside the target it jumps to, so `fn` performs the join and prints the target's symbol in the
+# pseudocode itself. What this case holds is the accounting around it, because a substitution
+# that silently covers part of the set is worse than none: the count of islands named, and, for
+# every one it could not name, WHICH of the two reasons applies -- a target outside the indexed
+# images, or an indexed image with no symbol at that address. The two have different answers, so
+# reporting them as one number would send a reader at the wrong instrument.
 crossing = None
 db = sqlite3.connect(f"file:{store / 'Images' / (basename + '.db')}?mode=ro", uri=True)
 row = db.execute(
@@ -111,17 +116,63 @@ if crossing is None:
     print("note: no call leaves this image, so the cross-image line had nothing to state")
 else:
     out = run([hex(crossing)])
-    if "leave" not in out.stdout:
+    if "call island" not in out.stdout:
         failures.append(f"3b: fn {crossing:#x} contains a call leaving the image and said nothing "
                         f"about it: {out.stdout[:400]!r}")
-    if "Sherlock calls" not in out.stdout:
-        failures.append("3b: fn reported calls leaving the image without naming the command that "
-                        "resolves them")
-    # The named command must answer, or fn is sending the reader nowhere.
-    resolved = subprocess.run([sherlock, "calls", hex(crossing), "--store", str(store),
-                               "--cache", cache], capture_output=True, text=True, timeout=900)
-    if "via" not in resolved.stdout:
-        failures.append(f"3b: the command fn names resolved nothing: {resolved.stdout[:400]!r}")
+
+    # How many islands layer 1 recorded for this function, and how many of their targets fall
+    # inside an indexed image. Measured here from the store rather than read off fn's own line,
+    # so the gate is not grading the tool against its own claim.
+    db = sqlite3.connect(f"file:{store / 'Images' / (basename + '.db')}?mode=ro", uri=True)
+    targets = [t for (t,) in db.execute(
+        "SELECT DISTINCT Target FROM Call WHERE Caller = ? AND Island IS NOT NULL", (crossing,))]
+    db.close()
+    inside = 0
+    for target in targets:
+        for image in (store / "Images").glob("*.db"):
+            if image.name.endswith(".HexRays.db"):
+                continue
+            other = sqlite3.connect(f"file:{image}?mode=ro", uri=True)
+            try:
+                hit = other.execute("SELECT 1 FROM Segment WHERE ? >= Address "
+                                    "AND ? < Address + Size LIMIT 1", (target, target)).fetchone()
+            except sqlite3.Error:
+                hit = None
+            other.close()
+            if hit:
+                inside += 1
+                break
+
+    named = re.search(r"layer 2: (\d+) of (\d+) call island", out.stdout)
+    if not named:
+        failures.append(f"3b: fn printed no island accounting: {out.stdout[:400]!r}")
+    else:
+        if int(named.group(2)) != len(targets):
+            failures.append(f"3b: fn counted {named.group(2)} islands where the store holds "
+                            f"{len(targets)}")
+        if int(named.group(1)) > inside:
+            failures.append(f"3b: fn claims {named.group(1)} named, but only {inside} of the "
+                            f"targets fall inside an indexed image")
+    # Whatever it could not name has to say WHY, and the reason has to be the true one.
+    outside = len(targets) - inside
+    if outside and "outside the" not in out.stdout:
+        failures.append(f"3b: {outside} target(s) are outside the indexed images and fn did not "
+                        f"say so: {out.stdout[:400]!r}")
+    if outside == 0 and inside and "outside the" in out.stdout:
+        failures.append("3b: fn blamed the corpus for targets that are inside it")
+
+    # The substitution itself, on an image whose targets ARE indexed: a resolved call must print
+    # its symbol instead of the placeholder. DesignLibrary calls SwiftUICore, both indexed.
+    design = run(["0x24053f798"])
+    if "_$s" not in design.stdout:
+        failures.append("3b: a call into an indexed image was not replaced by its target's "
+                        f"symbol: {design.stdout[:400]!r}")
+    for line in design.stdout.splitlines():
+        if line.startswith("layer 2:"):
+            continue
+        if "MEMORY[0x248" in line:
+            failures.append(f"3b: an island layer 1 resolved is still printed raw: {line!r}")
+            break
 
 # 4. --json carries the same answer, coverage included.
 raw = run([hex(address), "--json"])

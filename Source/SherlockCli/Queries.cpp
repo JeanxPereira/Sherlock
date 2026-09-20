@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <format>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -159,6 +160,124 @@ namespace Sherlock::Cli
                 text.remove_prefix(end + 1);
             }
             return lines;
+        }
+
+        // What layer 2 prints as MEMORY[0x...] is a branch island, and layer 1 recorded the
+        // island BESIDE the target it jumps to -- Call.Island. So the name the carved slice lost
+        // is not lost to the store: it is one join away, and the only reason a reader ever had to
+        // run a second instrument was that nothing performed it.
+        struct ResolvedIsland
+        {
+            std::uint64_t Target = 0;
+            std::string   Image;      // empty when no image's segments contain the target
+            std::string   Symbol;     // empty when the owning image has no symbol at it
+            std::string   Demangled;
+        };
+
+        Foundation::Expected<std::map<std::uint64_t, ResolvedIsland>>
+        ResolveIslands(const QueryEnvironment& env, Store::Database& owner,
+                       const std::vector<ImageRow>& rows, std::string_view cacheUuid,
+                       std::uint64_t start, std::uint64_t end)
+        {
+            std::map<std::uint64_t, ResolvedIsland> resolved;
+            auto calls = owner.Prepare("SELECT DISTINCT Island, Target FROM Call "
+                                       "WHERE Caller = ?1 AND Island IS NOT NULL");
+            if (!calls)
+            {
+                return std::unexpected(calls.error());
+            }
+            if (auto ok = calls->Bind(1, static_cast<std::int64_t>(start)); !ok)
+            {
+                return std::unexpected(ok.error());
+            }
+            (void)end;
+            for (;;)
+            {
+                auto row = calls->Step();
+                if (!row)
+                {
+                    return std::unexpected(row.error());
+                }
+                if (!*row)
+                {
+                    break;
+                }
+                resolved[static_cast<std::uint64_t>(calls->Int(0))] =
+                    ResolvedIsland{static_cast<std::uint64_t>(calls->Int(1)), {}, {}, {}};
+            }
+            if (resolved.empty())
+            {
+                return resolved;
+            }
+
+            // One pass per image rather than one per target: every store is opened at most once,
+            // and an image whose store will not open is skipped rather than failing the query --
+            // a name that cannot be resolved stays MEMORY[0x...] and is counted as unresolved.
+            for (const auto& image : rows)
+            {
+                bool wanted = false;
+                for (const auto& [island, entry] : resolved)
+                {
+                    (void)island;
+                    if (entry.Image.empty())
+                    {
+                        wanted = true;
+                        break;
+                    }
+                }
+                if (!wanted)
+                {
+                    break;
+                }
+                auto db = OpenImage(env, image, cacheUuid);
+                if (!db)
+                {
+                    continue;
+                }
+                auto inside = db->Prepare("SELECT 1 FROM Segment WHERE ?1 >= Address "
+                                          "AND ?1 < Address + Size LIMIT 1");
+                auto named = db->Prepare("SELECT N.Text, D.Text FROM Symbol S "
+                                         "JOIN Name N ON N.Id = S.Name "
+                                         "LEFT JOIN Name D ON D.Id = S.Demangled "
+                                         "WHERE S.Address = ?1 LIMIT 1");
+                if (!inside || !named)
+                {
+                    continue;
+                }
+                const auto basename = std::filesystem::path(image.Path).filename().string();
+                for (auto& [island, entry] : resolved)
+                {
+                    (void)island;
+                    if (!entry.Image.empty())
+                    {
+                        continue;
+                    }
+                    if (!inside->Bind(1, static_cast<std::int64_t>(entry.Target)) ||
+                        !named->Bind(1, static_cast<std::int64_t>(entry.Target)))
+                    {
+                        continue;
+                    }
+                    auto hit = inside->Step();
+                    const bool contained = hit && *hit;
+                    (void)inside->Reset();
+                    if (!contained)
+                    {
+                        (void)named->Reset();
+                        continue;
+                    }
+                    entry.Image = basename;
+                    if (auto symbol = named->Step(); symbol && *symbol)
+                    {
+                        entry.Symbol = std::string(named->Text(0));
+                        if (!named->IsNull(1))
+                        {
+                            entry.Demangled = std::string(named->Text(1));
+                        }
+                    }
+                    (void)named->Reset();
+                }
+            }
+            return resolved;
         }
 
         // A call whose target falls in no segment of this image leaves the image. Layer 2's
@@ -1059,19 +1178,129 @@ namespace Sherlock::Cli
             Emit(env, std::format("layer 2: {} line(s), {:.3f} s, pseudocode locates and does not "
                                   "close a value", (*stored)->Lines, (*stored)->Seconds));
 
-            // The carved slice loses every target outside the image, so those calls print as
-            // MEMORY[0x...]. Saying how many, and which command resolves them, is the difference
-            // between a reader knowing the gap is there and reading an unresolved address as an
-            // unknown one.
-            if (auto leaving = CallsLeavingImage(*db, start, start + size); leaving && *leaving > 0)
+            // The carved slice loses every target outside the image, and layer 2 prints those
+            // calls as MEMORY[<island>]. Layer 1 read the WHOLE cache and stored the island
+            // beside the target it jumps to, so the lost name is one join away -- performed here
+            // rather than named as a command for the reader to run, which is what it was.
+            const auto islands = ResolveIslands(env, *db, *rows, *catalogUuid, start, start + size);
+            std::map<std::uint64_t, ResolvedIsland> resolved;
+            if (islands)
             {
-                Emit(env, std::format("layer 2: {} call(s) leave {} and read as MEMORY[0x...]; "
-                                      "layer 1 has their targets -- Sherlock calls 0x{:x}",
-                                      *leaving, basename, start));
+                resolved = *islands;
+            }
+            std::size_t named = 0;
+            std::vector<std::uint64_t> unresolved;
+            std::set<std::string> remaining;
+            for (const auto& [island, entry] : resolved)
+            {
+                if (entry.Symbol.empty())
+                {
+                    unresolved.push_back(island);
+                }
+                else
+                {
+                    ++named;
+                }
+            }
+            if (!resolved.empty())
+            {
+                Emit(env, std::format("layer 2: {} of {} call island(s) leaving {} named from "
+                                      "layer 1", named, resolved.size(), basename));
+            }
+            // The zero rule on the substitution itself, and the two reasons kept apart because
+            // they have different answers: a target outside the indexed towers is the store's
+            // scope (the cache has thousands of images and this store holds the towers), while a
+            // target inside one with no symbol at it is that image's symbol table.
+            std::string outside, unnamed;
+            for (const auto island : unresolved)
+            {
+                const auto& entry = resolved[island];
+                auto& into = entry.Image.empty() ? outside : unnamed;
+                into += std::format("{}0x{:x}", into.empty() ? "" : " ", entry.Target);
+            }
+            if (!outside.empty())
+            {
+                Emit(env, std::format("layer 2: target(s) outside the {} indexed image(s), so "
+                                      "their call keeps its address: {}", rows->size(), outside));
+            }
+            if (!unnamed.empty())
+            {
+                Emit(env, std::format("layer 2: target(s) inside an indexed image that carries no "
+                                      "symbol at them: {}", unnamed));
             }
             for (const auto& line : SplitLines((*stored)->Pseudocode))
             {
-                Emit(env, std::string(line));
+                std::string text(line);
+                for (const auto& [island, entry] : resolved)
+                {
+                    if (entry.Symbol.empty())
+                    {
+                        continue;
+                    }
+                    const auto placeholder = std::format("MEMORY[0x{:X}]", island);
+                    for (auto at = text.find(placeholder); at != std::string::npos;
+                         at = text.find(placeholder, at + entry.Symbol.size()))
+                    {
+                        text.replace(at, placeholder.size(), entry.Symbol);
+                    }
+                }
+                // Counted from the text that is actually printed, not from what the join
+                // covered: a placeholder the reader can still see is a hole whatever the
+                // resolution rate above says, and the two are different sets.
+                for (auto at = text.find("MEMORY[0x"); at != std::string::npos;
+                     at = text.find("MEMORY[0x", at + 1))
+                {
+                    const auto close = text.find(']', at);
+                    if (close == std::string::npos)
+                    {
+                        continue;
+                    }
+                    const auto printed = text.substr(at + 7, close - at - 7);
+                    // An island layer 1 knows but could not name is already accounted for by the
+                    // two lines above; counting it here too would report one hole as two.
+                    bool known = false;
+                    for (const auto& [island, entry] : resolved)
+                    {
+                        (void)entry;
+                        if (std::format("0x{:X}", island) == printed)
+                        {
+                            known = true;
+                            break;
+                        }
+                    }
+                    if (!known)
+                    {
+                        remaining.insert(printed);
+                    }
+                }
+                Emit(env, text);
+            }
+            // The bound this feature can never cross, stated where it bites: the store indexes
+            // the towers, not the cache's four thousand images, so a call into anything else --
+            // the Swift runtime above all -- has no row to join against and keeps its address.
+            if (!remaining.empty())
+            {
+                std::string list;
+                for (const auto& address : remaining)
+                {
+                    list += (list.empty() ? "" : " ") + address;
+                }
+                Emit(env, std::format("layer 2: {} address(es) still print as MEMORY[...]: {} -- "
+                                      "they are not call islands layer 1 recorded, and fall in no "
+                                      "segment of the {} indexed image(s)",
+                                      remaining.size(), list, rows->size()));
+            }
+            // The mangled symbol goes inline because it is one token and keeps the pseudocode's
+            // shape; the human-readable form is longer than a line of C, so --full is where it
+            // lands, with the island and the target beside it for a seal to cite.
+            if (env.Full)
+            {
+                for (const auto& [island, entry] : resolved)
+                {
+                    Emit(env, std::format("  0x{:x} -> 0x{:x}  {}  {}", island, entry.Target,
+                                          entry.Image.empty() ? "?" : entry.Image,
+                                          entry.Demangled.empty() ? entry.Symbol : entry.Demangled));
+                }
             }
             return {VerdictKind::Found, (*stored)->Lines, {}, decompiled, attempted};
         }
