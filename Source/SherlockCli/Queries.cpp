@@ -280,6 +280,105 @@ namespace Sherlock::Cli
             return resolved;
         }
 
+        // Every island of one image at once, for a search rather than for one function. Built
+        // from layer 1 and the other images' symbol tables, so a name defined in ANOTHER image
+        // becomes findable -- which is the blind spot a text search over a carved slice has by
+        // construction, and the reason `grep ColorScheme` found nothing in the image that
+        // initializes ColorScheme.dark.
+        Foundation::Expected<std::map<std::uint64_t, std::string>>
+        IslandSymbols(const QueryEnvironment& env, const std::vector<ImageRow>& rows,
+                      std::string_view cacheUuid, Store::Database& source)
+        {
+            std::map<std::uint64_t, std::string> names;
+            std::map<std::uint64_t, std::uint64_t> targets;  // island -> target
+            auto islands = source.Prepare("SELECT DISTINCT Island, Target FROM Call "
+                                          "WHERE Island IS NOT NULL");
+            if (!islands)
+            {
+                return std::unexpected(islands.error());
+            }
+            for (;;)
+            {
+                auto row = islands->Step();
+                if (!row)
+                {
+                    return std::unexpected(row.error());
+                }
+                if (!*row)
+                {
+                    break;
+                }
+                targets[static_cast<std::uint64_t>(islands->Int(0))] =
+                    static_cast<std::uint64_t>(islands->Int(1));
+            }
+            if (targets.empty())
+            {
+                return names;
+            }
+
+            for (const auto& image : rows)
+            {
+                auto db = OpenImage(env, image, cacheUuid);
+                if (!db)
+                {
+                    continue;
+                }
+                // The segments first and in memory: a range test per target against a handful of
+                // rows costs nothing, where a query per target per image would be 18 times the
+                // work for the same answer.
+                std::vector<std::pair<std::uint64_t, std::uint64_t>> spans;
+                if (auto segments = db->Prepare("SELECT Address, Size FROM Segment"))
+                {
+                    for (;;)
+                    {
+                        auto row = segments->Step();
+                        if (!row || !*row)
+                        {
+                            break;
+                        }
+                        const auto start = static_cast<std::uint64_t>(segments->Int(0));
+                        spans.emplace_back(start, start + static_cast<std::uint64_t>(segments->Int(1)));
+                    }
+                }
+                if (spans.empty())
+                {
+                    continue;
+                }
+                auto named = db->Prepare("SELECT N.Text FROM Symbol S JOIN Name N ON N.Id = S.Name "
+                                         "WHERE S.Address = ?1 LIMIT 1");
+                if (!named)
+                {
+                    continue;
+                }
+                for (const auto& [island, target] : targets)
+                {
+                    if (names.contains(island))
+                    {
+                        continue;
+                    }
+                    bool inside = false;
+                    for (const auto& [from, to] : spans)
+                    {
+                        if (target >= from && target < to)
+                        {
+                            inside = true;
+                            break;
+                        }
+                    }
+                    if (!inside || !named->Bind(1, static_cast<std::int64_t>(target)))
+                    {
+                        continue;
+                    }
+                    if (auto row = named->Step(); row && *row)
+                    {
+                        names[island] = std::string(named->Text(0));
+                    }
+                    (void)named->Reset();
+                }
+            }
+            return names;
+        }
+
         // A call whose target falls in no segment of this image leaves the image. Layer 2's
         // pseudocode cannot name those -- the slice IDA decompiled does not contain them -- and
         // layer 1, which read the whole cache, can.
@@ -1335,7 +1434,7 @@ namespace Sherlock::Cli
 
         const std::string needle = ignoreCase ? Lowered(pattern) : std::string(pattern);
         std::size_t hits = 0, searchedImages = 0, selectedImages = 0;
-        std::uint64_t searchedFunctions = 0, refused = 0;
+        std::uint64_t searchedFunctions = 0, refused = 0, crossImageHits = 0, unindexed = 0;
         std::vector<std::string> withoutLayerTwo, partial;
         bool truncated = false;
 
@@ -1393,6 +1492,46 @@ namespace Sherlock::Cli
             }
 
             ++searchedImages;
+
+            // Which of this image's islands carry a symbol the pattern matches. Only those are
+            // needed: a line mentioning one of them is a hit even though the stored text has the
+            // island's ADDRESS where its name would be, and substituting every island in every
+            // line to discover that would be the same answer for far more work.
+            std::map<std::uint64_t, std::string> crossing;
+            const auto row = std::find_if(rows->begin(), rows->end(), [&](const ImageRow& candidate) {
+                return std::filesystem::path(candidate.Path).filename().string() == basename;
+            });
+            if (auto db = row == rows->end()
+                              ? Foundation::Expected<Store::Database>(std::unexpected(
+                                    Foundation::Fail(Foundation::DiagnosticCode::NotFound,
+                                                     Foundation::Severity::NotVerified,
+                                                     "Cli::RunGrep", basename,
+                                                     "no catalog row for this image",
+                                                     "rebuild the catalog").error()))
+                              : OpenImage(env, *row, *catalogUuid))
+            {
+                if (auto all = IslandSymbols(env, *rows, *catalogUuid, *db))
+                {
+                    for (const auto& [island, symbol] : *all)
+                    {
+                        const bool hit = ignoreCase ? Lowered(symbol).find(needle) != std::string::npos
+                                                    : symbol.find(needle) != std::string::npos;
+                        if (hit)
+                        {
+                            crossing[island] = symbol;
+                        }
+                    }
+                }
+                else
+                {
+                    ++unindexed;
+                }
+            }
+            else
+            {
+                ++unindexed;
+            }
+
             const auto walked = HexRaysExport::ForEachPseudocode(
                 *layerTwo, [&](std::uint64_t address, std::string_view text) {
                     ++searchedFunctions;
@@ -1400,8 +1539,29 @@ namespace Sherlock::Cli
                     for (const auto& line : SplitLines(text))
                     {
                         ++number;
-                        const bool found = ignoreCase ? Lowered(line).find(needle) != std::string::npos
-                                                      : line.find(needle) != std::string_view::npos;
+                        bool found = ignoreCase ? Lowered(line).find(needle) != std::string::npos
+                                                : line.find(needle) != std::string_view::npos;
+                        std::string shown;
+                        if (!found)
+                        {
+                            for (const auto& [island, symbol] : crossing)
+                            {
+                                const auto placeholder = std::format("MEMORY[0x{:X}]", island);
+                                if (line.find(placeholder) == std::string_view::npos)
+                                {
+                                    continue;
+                                }
+                                found = true;
+                                shown = std::string(line);
+                                for (auto at = shown.find(placeholder); at != std::string::npos;
+                                     at = shown.find(placeholder, at + symbol.size()))
+                                {
+                                    shown.replace(at, placeholder.size(), symbol);
+                                }
+                                ++crossImageHits;
+                                break;
+                            }
+                        }
                         if (!found)
                         {
                             continue;
@@ -1412,7 +1572,8 @@ namespace Sherlock::Cli
                             truncated = true;
                             return false;
                         }
-                        Emit(env, std::format("{} 0x{:x}:{}: {}", basename, address, number, line));
+                        Emit(env, std::format("{} 0x{:x}:{}: {}", basename, address, number,
+                                              shown.empty() ? std::string(line) : shown));
                     }
                     return true;
                 });
@@ -1464,17 +1625,24 @@ namespace Sherlock::Cli
                                   "the decompiler refused them, and no text search reaches inside",
                                   refused));
         }
-        // The blind spot that makes this command's zero dangerous, printed on every search rather
-        // than only on an empty one: layer 2 decompiles a slice carved out of the cache, so a call
-        // leaving the image reads as MEMORY[0x...] with no symbol on it. A name defined in another
-        // image is therefore UNFINDABLE here however many times it is called -- measured against a
-        // known fact, `ColorScheme.dark` at 0x22f4da22c is inside CampoUIInternal's pseudocode and
-        // this search does not see it. Reading such a zero as absence is the error the line exists
-        // to prevent; the disassembly route resolves those names.
-        Emit(env, std::format("searched {} function(s) in {} image(s); a name from ANOTHER image is "
-                              "not findable here -- cross-image calls read as MEMORY[0x...], so use "
-                              "fn --asm or References/scripts/fn.py --disasm for those",
-                              searchedFunctions, searchedImages));
+        // The blind spot that makes this command's zero dangerous, printed on every search
+        // rather than only on an empty one. Layer 2 decompiles a slice carved out of the cache,
+        // so a call leaving the image reads as MEMORY[0x...] with no symbol on it; a target in
+        // one of the indexed images is matched by the symbol layer 1 holds for it, and a target
+        // anywhere else in the cache carries no name for any pattern to match. The two counts
+        // are separate because they send a reader at different instruments.
+        Emit(env, std::format("searched {} function(s) in {} image(s); {} hit(s) matched a name "
+                              "the carved slice does not carry, resolved through layer 1's call "
+                              "islands", searchedFunctions, searchedImages, crossImageHits));
+        if (unindexed > 0)
+        {
+            Emit(env, std::format("{} image(s) had no layer-1 store to resolve their islands "
+                                  "against, so a cross-image name in them stays unfindable",
+                                  unindexed));
+        }
+        Emit(env, std::format("a call into anything outside the {} indexed image(s) -- the Swift "
+                              "and ObjC runtimes above all -- still has no name to match",
+                              rows->size()));
 
         if (hits == 0)
         {

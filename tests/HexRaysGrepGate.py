@@ -7,14 +7,16 @@
 #   - an image has no layer 2, so it was never opened;
 #   - a limit stopped the walk before the search reached an image;
 #   - a function's decompilation failed, so there is no text inside it to match;
-#   - a name defined in ANOTHER image cannot appear at all, because the carved slice reads its
-#     calls as MEMORY[0x...] -- measured: ColorScheme.dark is initialized inside CampoUIInternal
-#     at 0x22f4da22c and this search does not find the word.
+#   - a call leaves the image into something the store does not index, so it carries no name at
+#     all -- the Swift and ObjC runtimes above all, which are not among the towers.
 #
+# A name defined in another INDEXED image used to belong on that list and no longer does: the
+# search resolves it through the island layer 1 stored beside the target, which case 6 holds.
 # A reader who is not told reads any of these as "the pattern is not there". The positive control
 # is the first case below: a term that IS in the corpus, so the instrument is shown to find what
 # it can find before any of its silences are read as evidence.
 import os
+import re
 import subprocess
 import sys
 
@@ -42,10 +44,11 @@ if code != 0 or "verdict: FOUND" not in found:
 if "DesignLibrary 0x" not in found:
     failures.append("positive control: a hit does not carry its image and address")
 
-# 2. The cross-image caveat, on EVERY search and not only an empty one. It is the silence a reader
-#    is least able to guess at, because the pattern may be called hundreds of times in the image.
-if "another image is not findable here" not in found.lower():
-    failures.append("a search does not declare that a name from another image cannot be found")
+# 2. The caveat that survives resolution, on EVERY search and not only an empty one: a call into
+#    an image the store does not index has no symbol to match, however many times it is made.
+if "outside the" not in found:
+    failures.append("a search does not declare that a call into an unindexed image has no name "
+                    "to match")
 
 # 3. An honest zero. The pattern is absent, and the verdict must be EMPTY rather than an error --
 #    but the output has to carry what was not looked at alongside it.
@@ -83,6 +86,38 @@ if len(numbers) != 2 or not numbers[0].isdigit() or not numbers[1].isdigit():
 elif int(numbers[1]) <= int(numbers[0]):
     failures.append(f"a truncated search counts only the images it visited ({verdict.strip()}): "
                     f"the denominator has to carry the ones it never reached")
+
+# 6. A name defined in ANOTHER image. The carved slice records such a call as MEMORY[<island>]
+#    with no symbol on it, so the stored text cannot contain the name -- this case proves the
+#    search reaches it anyway, through the island layer 1 stored beside the target. The pattern
+#    is a fragment of a SwiftUICore mangled symbol; what proves it was NOT simply present in the
+#    stored text is the cross-image counter in 6b, not an assumption about the corpus.
+CROSS = "ControlSizeOMa"
+
+code, found = run(CROSS, "--images", "DesignLibrary", "--limit", "5")
+print(found)
+if "verdict: FOUND" not in found:
+    failures.append(f"6: {CROSS} is another image's symbol reached through an island and the "
+                    f"search did not find it: {found.strip()[-300:]!r}")
+if "_$s7SwiftUI11ControlSizeOMa" not in found:
+    failures.append("6: the hit printed the island's address instead of the target's symbol")
+
+# 6b. The one number that separates "the pattern was already in the stored text" from "the
+#     pattern was reached through layer 1". Without it a reader cannot tell which happened, and
+#     case 6 above would pass on a corpus where the name happened to appear natively.
+crossing = re.search(r"(\d+) hit\(s\) matched a name the carved slice does not carry", found)
+if not crossing:
+    failures.append(f"6b: the search does not say how many hits came from a resolved island: "
+                    f"{found.strip()[-300:]!r}")
+elif int(crossing.group(1)) == 0:
+    failures.append("6b: every hit came from the stored text, so this case proved nothing about "
+                    "cross-image resolution")
+
+# 6c. What resolution does NOT reach, stated on every run: the store indexes the towers, not the
+#     cache's thousands of images, so a call into the Swift or ObjC runtime still has no name.
+if "outside the" not in found:
+    failures.append("6c: the search does not declare that a call into an unindexed image still "
+                    "has no name to match")
 
 if failures:
     for failure in failures:
