@@ -149,7 +149,7 @@ set_tests_properties(Sherlock.BuildDocuments PROPERTIES FIXTURES_SETUP SherlockD
 # already scanned -- the built store was missing every shader seal until this fix.
 set(SHERLOCK_DOCUMENTS_RE_SECTIONS 2753)
 set(SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS 215)
-set(SHERLOCK_DOCUMENTS_BIN_SEALS 2207)
+set(SHERLOCK_DOCUMENTS_BIN_SEALS 2281)
 
 add_test(NAME Sherlock.DocumentsExactCounts
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/DocumentsExactCounts.py
