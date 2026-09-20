@@ -8,6 +8,8 @@
 #include <loader.hpp>
 #include <hexrays.hpp>
 
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -20,7 +22,7 @@ namespace
     {
         qprintf("SherlockHexRays --version\n"
                 "SherlockHexRays --image <file> --store <dir> --name <image> --image-path <cache path>\n"
-                "                --build <build> [--keep-database] [--resume]\n");
+                "                --build <build> [--keep-database] [--resume] [--batch <functions>]\n");
     }
 
     bool Flag(const char* argument, const char* name)
@@ -91,6 +93,16 @@ int main(int argc, char** argv)
         else if (Flag(argv[i], "--resume"))
         {
             options.Resume = true;
+        }
+        else if (Flag(argv[i], "--batch") && hasValue)
+        {
+            const long long value = std::atoll(argv[++i]);
+            if (value <= 0)
+            {
+                qprintf("SherlockHexRays: --batch takes a count above zero\n");
+                return 2;
+            }
+            options.BatchSize = static_cast<std::uint64_t>(value);
         }
         else
         {

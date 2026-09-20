@@ -29,6 +29,11 @@ namespace Sherlock::HexRaysExport
         Failed,
     };
 
+    // What a too-big row carries in its Reason, written from here rather than copied from the
+    // decompiler's own wording: the count of them is read back out of a finished store with an
+    // equality query, and IDA's description text is not ours to hold stable.
+    inline constexpr std::string_view kTooBigReason = "MERR_FUNCSIZE: too big for the decompiler";
+
     std::string_view ToText(Status status);
     std::optional<Status> FromText(std::string_view text);
 
@@ -53,6 +58,8 @@ namespace Sherlock::HexRaysExport
     {
         std::uint64_t Decompiled = 0;
         std::uint64_t Attempted  = 0;
+        std::uint64_t TooBig     = 0;
+        std::uint64_t Lines      = 0;
     };
 
     std::filesystem::path StorePath(const std::filesystem::path& storeDir, std::string_view imageName);
@@ -63,6 +70,20 @@ namespace Sherlock::HexRaysExport
 
     Expected<void> WriteRows(Store::Database& db, const std::vector<DecompilationRow>& rows,
                              const std::vector<NameRow>& names);
+
+    // A store is written in batches, so one that exists says nothing about whether every function
+    // in the image was attempted. Complete is what says it, and MarkComplete is the last write a
+    // finished run makes.
+    Expected<void> MarkComplete(Store::Database& db);
+
+    // A store with no Complete key was written before layer 2 wrote in batches, when the single
+    // write at the end made existence and completeness the same fact. Those stores are complete,
+    // and reading the absent key as "unfinished" would re-decompile every one of them.
+    Expected<bool> IsComplete(Store::Database& db);
+
+    // The addresses a partial store already carries, so an interrupted run resumes at the
+    // function it did not reach instead of at the first one.
+    Expected<std::vector<std::uint64_t>> ReadStoredFunctions(Store::Database& db);
 
     Expected<std::optional<DecompilationRow>> ReadFunction(Store::Database& db, std::uint64_t address);
     Expected<Coverage>                        ReadCoverage(Store::Database& db);

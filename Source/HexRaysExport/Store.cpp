@@ -53,6 +53,29 @@ namespace Sherlock::HexRaysExport
             return {};
         }
 
+        Expected<std::optional<std::string>> MetaValue(Store::Database& db, std::string_view key)
+        {
+            auto statement = db.Prepare("SELECT Value FROM Meta WHERE Key = ?1");
+            if (!statement)
+            {
+                return std::unexpected(statement.error());
+            }
+            if (auto ok = statement->Bind(1, key); !ok)
+            {
+                return std::unexpected(ok.error());
+            }
+            auto row = statement->Step();
+            if (!row)
+            {
+                return std::unexpected(row.error());
+            }
+            if (!*row)
+            {
+                return std::nullopt;
+            }
+            return std::string(statement->Text(0));
+        }
+
         Expected<std::vector<std::byte>> Compress(std::string_view text)
         {
             const std::size_t bound = ::ZSTD_compressBound(text.size());
@@ -147,6 +170,12 @@ namespace Sherlock::HexRaysExport
         {
             return ok;
         }
+        // Created unfinished on purpose. Every call here is the start of a run that intends to
+        // reach the last function, and only reaching it writes the 1.
+        if (auto ok = WriteMeta(db, "Complete", "0"); !ok)
+        {
+            return ok;
+        }
         // Two IDA versions decompile the same function differently, so a row states which one
         // produced it rather than leaving the reader to assume the installed one.
         return WriteMeta(db, "IdaVersion", idaVersion);
@@ -155,6 +184,45 @@ namespace Sherlock::HexRaysExport
     Expected<void> CheckStoreSchema(Store::Database& db)
     {
         return Store::CheckSchema(db, kKind, kHexRaysSchemaVersion);
+    }
+
+    Expected<void> MarkComplete(Store::Database& db)
+    {
+        return WriteMeta(db, "Complete", "1");
+    }
+
+    Expected<bool> IsComplete(Store::Database& db)
+    {
+        auto value = MetaValue(db, "Complete");
+        if (!value)
+        {
+            return std::unexpected(value.error());
+        }
+        return !value->has_value() || **value == "1";
+    }
+
+    Expected<std::vector<std::uint64_t>> ReadStoredFunctions(Store::Database& db)
+    {
+        auto statement = db.Prepare("SELECT Function FROM Decompilation");
+        if (!statement)
+        {
+            return std::unexpected(statement.error());
+        }
+        std::vector<std::uint64_t> out;
+        while (true)
+        {
+            auto row = statement->Step();
+            if (!row)
+            {
+                return std::unexpected(row.error());
+            }
+            if (!*row)
+            {
+                break;
+            }
+            out.push_back(static_cast<std::uint64_t>(statement->Int(0)));
+        }
+        return out;
     }
 
     Expected<void> WriteRows(Store::Database& db, const std::vector<DecompilationRow>& rows,
@@ -322,6 +390,31 @@ namespace Sherlock::HexRaysExport
         {
             return std::unexpected(attempted.error());
         }
-        return Coverage{static_cast<std::uint64_t>(*decompiled), static_cast<std::uint64_t>(*attempted)};
+        auto lines = db.ScalarInt("SELECT coalesce(sum(Lines), 0) FROM Decompilation");
+        if (!lines)
+        {
+            return std::unexpected(lines.error());
+        }
+
+        // Counted out of the store rather than carried in a run's own tally: a resumed run
+        // attempts only what is missing, so a counter it kept would report the last slice and
+        // call it the image.
+        auto tooBig = db.Prepare("SELECT count(*) FROM Decompilation WHERE Reason = ?1");
+        if (!tooBig)
+        {
+            return std::unexpected(tooBig.error());
+        }
+        if (auto ok = tooBig->Bind(1, kTooBigReason); !ok)
+        {
+            return std::unexpected(ok.error());
+        }
+        auto row = tooBig->Step();
+        if (!row)
+        {
+            return std::unexpected(row.error());
+        }
+        return Coverage{static_cast<std::uint64_t>(*decompiled), static_cast<std::uint64_t>(*attempted),
+                        *row ? static_cast<std::uint64_t>(tooBig->Int(0)) : 0,
+                        static_cast<std::uint64_t>(*lines)};
     }
 }

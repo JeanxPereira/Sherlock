@@ -22,7 +22,12 @@ namespace Sherlock::HexRaysExport
         std::string           ImagePath; // the catalog's Image.Path, cache-relative
         std::string           Build;
         bool                  KeepDatabase = false;  // a tower's .i64 stays for interactive use
-        bool                  Resume       = false;  // a store already holding rows is left alone
+        bool                  Resume       = false;  // a finished store is left alone, a partial one continued
+
+        // How many functions are held before the store is written. A 44 MB image decompiles for
+        // hours, and an interruption costs exactly what is still held here -- this number is the
+        // ceiling on that loss.
+        std::uint64_t         BatchSize = 1000;
     };
 
     struct WorkerReport
@@ -37,7 +42,10 @@ namespace Sherlock::HexRaysExport
         double         OpenSeconds = 0;
         double         Seconds     = 0;
         std::string    IdaVersion;
-        bool           Resumed = false;  // the store was already there and nothing was decompiled
+        bool           Resumed = false;  // the store was already complete and nothing was decompiled
+
+        // Rows a partial store already held when this run started: what the resume saved.
+        std::uint64_t  Carried = 0;
 
         // "functions=N decompiled=N …", the one line the parent reads off a finished worker.
         std::string Format() const;

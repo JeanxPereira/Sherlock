@@ -8,6 +8,11 @@
 #
 # Reading "another session holds it" off debris is how a killed export blocks itself forever, so
 # this gate drives both branches: the same file, once held open and once not.
+#
+# A third branch splits the second one. Debris this worker left is its own to delete, and --resume
+# has to clear it or no interrupted export ever resumes -- but a crashed interactive session leaves
+# the identical files, and those are analysis IDA can still recover. The run marker is what
+# separates them, so the same debris is driven twice: once without the marker and once with it.
 import os
 import subprocess
 import sys
@@ -27,9 +32,9 @@ with tempfile.TemporaryDirectory() as tmp:
     unpacked = root / "Pretend.id0"
     unpacked.write_bytes(b"an unpacked IDA database")
 
-    def run():
+    def run(*extra):
         return subprocess.run([worker, "--image", str(image), "--store", str(root / "store"),
-                               "--name", "Pretend", "--build", "gate"],
+                               "--name", "Pretend", "--build", "gate", *extra],
                               capture_output=True, text=True, env=env, timeout=600)
 
     # Nothing holds the file: this is debris, and the worker says which files to remove.
@@ -54,8 +59,29 @@ with tempfile.TemporaryDirectory() as tmp:
     finally:
         handle.close()
 
+    # --resume alone does not license deleting a database. Debris and a crashed interactive
+    # session look the same on disk, and the second is analysis somebody can still recover, so
+    # what licenses the delete is our own marker -- not the caller's intent.
+    unasked = run("--resume")
+    print(unasked.stdout, unasked.stderr)
+    if "interrupted run left" not in unasked.stdout:
+        failures.append(f"resume without marker: the refusal was dropped: {unasked.stdout!r}")
+    if not unpacked.exists():
+        failures.append("resume without marker: a database nothing claims was deleted anyway")
+
+    # With the marker beside it, the same debris is this worker's own interrupted run: it is
+    # cleared and the run proceeds to fail on the image, which is the next honest answer.
+    marker = root / "Pretend.sherlock-run"
+    marker.write_text("Pretend")
+    mine = run("--resume")
+    print(mine.stdout, mine.stderr)
+    if "interrupted run left" in mine.stdout:
+        failures.append(f"resume with marker: own debris still blocked the run: {mine.stdout!r}")
+    if unpacked.exists():
+        failures.append("resume with marker: the worker's own debris survived the run")
+
     # And with no unpacked database at all, the refusal must come from the image, not the guard.
-    unpacked.unlink()
+    unpacked.unlink(missing_ok=True)
     clean = run()
     print(clean.stdout, clean.stderr)
     if "interrupted run left" in clean.stdout or "a live process holds" in clean.stdout:

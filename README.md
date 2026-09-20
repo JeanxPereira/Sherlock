@@ -56,14 +56,31 @@ on purpose, so a different clone or worktree gets its own).
                            --images-dir <corpus>/<build>/extracted/dylibs `
                            --ida-dir "C:/Program Files/IDA Professional 9.2"
 
-One worker process per image, towers first, two at a time by default. `--resume` skips an image
-already exported and resets one a crash left mid-flight. The free space on the store's disk is
-checked before each image and the run stops with exit 2 below `--min-free-bytes`.
+One worker process per image, towers first, two at a time by default. The free space on the
+store's disk is checked before each image and the run stops with exit 2 below `--min-free-bytes`.
+
+**The store is written as the run goes, not at its end.** A worker holds `--batch` functions
+(1 000 by default) and writes them, so an interruption costs at most that batch rather than the
+whole image. A 44 MB tower decompiles for hours, and hours is what a single write at the end puts
+at risk of anything that can stop a process.
+
+`--resume` therefore has three answers, not two. A store marked complete is left alone; a partial
+one is continued at the function it did not reach, with `carried=N` in the report saying how many
+rows it inherited; a store that is empty, unreadable or of another schema is built again. The mark
+is a `Complete` key in the store's `Meta`, and a store written before layer 2 wrote in batches has
+no such key and counts as complete -- existence and completeness were the same fact then.
 
 The worker opens the EXTRACTED image, not the cache, and keeps its `.i64` for a tower. An
 interrupted run leaves IDA's database unpacked beside the image; the next run says so and names
 the `.id0`/`.id1`/`.nam`/`.til` to delete, which is a different answer from a live session holding
 the same files.
+
+**Under `--resume` the worker clears that database itself, but only its own.** A crashed
+interactive session leaves the identical files, and those are analysis IDA can still recover, so
+what licenses the delete is a `.sherlock-run` marker the worker writes beside the image while it
+holds a database open. Marker plus nothing holding the files plus `--resume` means the debris is
+this worker's; without the marker the refusal stands. A resume that cannot clear its own debris is
+a resume that never runs twice.
 
 `fn <address>` answers from layer 2 and says so; with `--asm` it disassembles layer 1 instead. An
 address layer 2 does not cover prints the `build hexrays` command that would cover it.

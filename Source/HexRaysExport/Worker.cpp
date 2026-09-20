@@ -19,6 +19,8 @@
 
 #include <windows.h>
 #include <format>
+#include <optional>
+#include <unordered_set>
 #include <vector>
 
 namespace Sherlock::HexRaysExport
@@ -76,6 +78,41 @@ namespace Sherlock::HexRaysExport
             return Unpacked::None;
         }
 
+        // Beside the image for as long as this worker holds a database open, and gone once it
+        // closes cleanly. It is the only thing that separates our own interrupted run's debris
+        // from an interactive session's crashed database: on disk the two read identically, and
+        // the second is somebody's analysis that IDA can still recover.
+        std::filesystem::path RunMarker(const std::filesystem::path& image)
+        {
+            return std::filesystem::path(image).replace_extension(".sherlock-run");
+        }
+
+        // pro.h poisons the stdio that the standard file streams are built on -- the same reason
+        // this file prints with qprintf -- so the marker is written through the Win32 call.
+        bool WriteMarker(const std::filesystem::path& marker, std::string_view text)
+        {
+            HANDLE handle = CreateFileW(marker.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (handle == INVALID_HANDLE_VALUE)
+            {
+                return false;
+            }
+            DWORD written = 0;
+            const bool ok =
+                WriteFile(handle, text.data(), static_cast<DWORD>(text.size()), &written, nullptr) != 0;
+            CloseHandle(handle);
+            return ok;
+        }
+
+        void RemoveUnpacked(const std::filesystem::path& image)
+        {
+            std::error_code ec;
+            for (const char* extension : {".id0", ".id1", ".id2", ".nam", ".til"})
+            {
+                std::filesystem::remove(std::filesystem::path(image).replace_extension(extension), ec);
+            }
+        }
+
         // Hex-Rays lines carry IDA's own colour tags. The stored text is what `fn` prints, so the
         // tags come off here rather than at every reader.
         std::string PlainText(cfunc_t& function, std::uint32_t& lines)
@@ -97,10 +134,10 @@ namespace Sherlock::HexRaysExport
 
     std::string WorkerReport::Format() const
     {
-        return std::format("{}functions={} decompiled={} too-big={} failed={} lines={} image-bytes={} "
-                           "store-bytes={} open-seconds={:.2f} seconds={:.2f} ida={}",
+        return std::format("{}functions={} decompiled={} too-big={} failed={} lines={} carried={} "
+                           "image-bytes={} store-bytes={} open-seconds={:.2f} seconds={:.2f} ida={}",
                            Resumed ? "resumed " : "", Functions, Decompiled, TooBig, Failures, Lines,
-                           ImageBytes, StoreBytes, OpenSeconds, Seconds, IdaVersion);
+                           Carried, ImageBytes, StoreBytes, OpenSeconds, Seconds, IdaVersion);
     }
 
     Expected<WorkerReport> RunWorker(const WorkerOptions& options)
@@ -121,6 +158,16 @@ namespace Sherlock::HexRaysExport
                         std::format("a live process holds {}", witness.filename().string()),
                         "close the IDA session holding it, or export a copy of the image");
         case Unpacked::LeftBehind:
+            // Deleted here only when it is ours to delete: the exclusive-write probe has already
+            // proven nobody holds these files, our marker says the run that left them was this
+            // worker, and --resume says the caller means to continue it. Without the marker the
+            // database belongs to someone's IDA session and the refusal stands -- a resume that
+            // cannot clear its own debris is a resume that never runs twice.
+            if (options.Resume && std::filesystem::exists(RunMarker(options.Image), ec))
+            {
+                RemoveUnpacked(options.Image);
+                break;
+            }
             return Fail(DiagnosticCode::Io, Severity::NotVerified, "HexRaysExport::RunWorker",
                         options.Image.string(),
                         std::format("an interrupted run left {} behind and nothing holds it",
@@ -134,30 +181,75 @@ namespace Sherlock::HexRaysExport
         report.IdaVersion = IdaVersionText();
         report.ImageBytes = std::filesystem::file_size(options.Image, ec);
 
-        // --resume mirrors `build facts --resume`: an image already exported costs nothing on the
-        // next run. A store that exists but carries no rows is a crashed run, not progress, and
-        // is exported again.
-        const auto existing = StorePath(options.StoreDir, options.ImageName);
-        if (options.Resume && std::filesystem::exists(existing, ec))
+        std::filesystem::create_directories(options.StoreDir, ec);
+        const auto storePath = StorePath(options.StoreDir, options.ImageName);
+
+        // --resume mirrors `build facts --resume`, with one more state than that command has.
+        // A store that says Complete costs nothing on the next run; a partial one is continued
+        // at the function it did not reach; one that is unreadable, of the wrong schema or empty
+        // is built again from the first function.
+        std::vector<std::uint64_t> already;
+        if (std::filesystem::exists(storePath, ec))
         {
-            auto opened = Store::Database::Open(existing, Store::Database::Mode::ReadOnly);
-            if (opened && CheckStoreSchema(*opened))
+            bool carry = false;
+            if (options.Resume)
             {
-                auto coverage = ReadCoverage(*opened);
-                if (coverage && coverage->Attempted > 0)
+                auto opened = Store::Database::Open(storePath, Store::Database::Mode::ReadOnly);
+                if (opened && CheckStoreSchema(*opened))
                 {
-                    report.Resumed = true;
-                    report.Functions = coverage->Attempted;
-                    report.Decompiled = coverage->Decompiled;
-                    report.StoreBytes = std::filesystem::file_size(existing, ec);
-                    return report;
+                    auto complete = IsComplete(*opened);
+                    auto coverage = ReadCoverage(*opened);
+                    if (complete && coverage && coverage->Attempted > 0)
+                    {
+                        if (*complete)
+                        {
+                            report.Resumed    = true;
+                            report.Functions  = coverage->Attempted;
+                            report.Decompiled = coverage->Decompiled;
+                            report.TooBig     = coverage->TooBig;
+                            report.Failures   = coverage->Attempted - coverage->Decompiled - coverage->TooBig;
+                            report.Lines      = coverage->Lines;
+                            report.Carried    = coverage->Attempted;
+                            report.StoreBytes = std::filesystem::file_size(storePath, ec);
+                            return report;
+                        }
+                        if (auto stored = ReadStoredFunctions(*opened))
+                        {
+                            already = std::move(*stored);
+                            carry   = true;
+                        }
+                    }
                 }
             }
+            if (!carry)
+            {
+                // The sidecars go with it. A -wal left by a killed process is replayed into the
+                // next database opened under that name, which would put rows behind a store the
+                // caller asked to start clean.
+                std::filesystem::remove(storePath, ec);
+                std::filesystem::remove(std::filesystem::path(storePath) += "-wal", ec);
+                std::filesystem::remove(std::filesystem::path(storePath) += "-shm", ec);
+            }
+        }
+        report.Carried = already.size();
+
+        // Written before the database exists, because IDA unpacks it during open_database and a
+        // run killed inside that call leaves debris the next run has to recognise as ours.
+        const auto marker = RunMarker(options.Image);
+        if (!WriteMarker(marker, options.ImageName))
+        {
+            // Refused rather than run without it: IDA is about to write a multi-gigabyte database
+            // into this same directory, and a run whose debris cannot be told from an interactive
+            // session's is a run that can never resume after an interruption.
+            return Fail(DiagnosticCode::Io, Severity::NotVerified, "HexRaysExport::RunWorker",
+                        marker.string(), "the run marker could not be written beside the image",
+                        "give the corpus directory write permission and run this again");
         }
 
         const auto openedAt = std::chrono::steady_clock::now();
         if (open_database(options.Image.string().c_str(), /*run_auto=*/true) != 0)
         {
+            std::filesystem::remove(marker, ec);
             return Fail(DiagnosticCode::Io, Severity::Failed, "HexRaysExport::RunWorker",
                         options.Image.string(), "open_database refused the image",
                         "check that the file is a Mach-O image IDA can load");
@@ -167,6 +259,7 @@ namespace Sherlock::HexRaysExport
         if (!init_hexrays_plugin())
         {
             close_database(false);
+            std::filesystem::remove(marker, ec);
             return Fail(DiagnosticCode::Mismatch, Severity::NotVerified, "HexRaysExport::RunWorker",
                         options.Image.string(),
                         "the decompiler did not answer with a database open",
@@ -178,9 +271,43 @@ namespace Sherlock::HexRaysExport
         const std::size_t quantity = get_func_qty();
         report.Functions = quantity;
 
+        // Held in an optional so the connection can be closed by hand before the store is
+        // measured: Database closes in its destructor, and the size of an open one is a lie.
+        std::optional<Store::Database> store;
+        {
+            auto opened = Store::Database::Open(storePath, Store::Database::Mode::ReadWrite);
+            if (!opened)
+            {
+                close_database(false);
+                std::filesystem::remove(marker, ec);
+                return std::unexpected(opened.error());
+            }
+            store.emplace(std::move(*opened));
+        }
+        if (auto ok = CreateStore(*store, options.ImagePath, options.Build, report.IdaVersion); !ok)
+        {
+            close_database(false);
+            std::filesystem::remove(marker, ec);
+            return std::unexpected(ok.error());
+        }
+
+        const std::unordered_set<std::uint64_t> carried(already.begin(), already.end());
+
         std::vector<DecompilationRow> rows;
         std::vector<NameRow> names;
-        rows.reserve(quantity);
+        const auto batch = static_cast<std::size_t>(options.BatchSize == 0 ? 1 : options.BatchSize);
+        rows.reserve(batch);
+
+        auto flush = [&]() -> Expected<void> {
+            if (rows.empty() && names.empty())
+            {
+                return {};
+            }
+            auto ok = WriteRows(*store, rows, names);
+            rows.clear();
+            names.clear();
+            return ok;
+        };
 
         qstring name;
         for (std::size_t index = 0; index < quantity; ++index)
@@ -191,6 +318,10 @@ namespace Sherlock::HexRaysExport
                 continue;
             }
             const auto address = static_cast<std::uint64_t>(function->start_ea);
+            if (carried.contains(address))
+            {
+                continue;
+            }
 
             if (get_func_name(&name, function->start_ea) > 0 && name.length() > 0)
             {
@@ -207,46 +338,66 @@ namespace Sherlock::HexRaysExport
 
             if (decompiled == nullptr)
             {
-                const bool tooBig = failure.code == MERR_FUNCSIZE;
-                tooBig ? ++report.TooBig : ++report.Failures;
                 qstring description = failure.desc();
-                rows.push_back({address, {}, 0, Status::Failed,
-                                description.empty() ? std::format("merror {}", int(failure.code))
-                                                    : std::string(description.c_str(), description.length()),
-                                seconds});
-                continue;
+                std::string reason =
+                    failure.code == MERR_FUNCSIZE
+                        ? std::string(kTooBigReason)
+                        : (description.empty() ? std::format("merror {}", int(failure.code))
+                                               : std::string(description.c_str(), description.length()));
+                rows.push_back({address, {}, 0, Status::Failed, std::move(reason), seconds});
+            }
+            else
+            {
+                std::uint32_t lines = 0;
+                std::string text = PlainText(*decompiled, lines);
+                rows.push_back({address, std::move(text), lines, Status::Ok, {}, seconds});
             }
 
-            std::uint32_t lines = 0;
-            std::string text = PlainText(*decompiled, lines);
-            report.Lines += lines;
-            ++report.Decompiled;
-            rows.push_back({address, std::move(text), lines, Status::Ok, {}, seconds});
+            if (rows.size() >= batch)
+            {
+                if (auto ok = flush(); !ok)
+                {
+                    close_database(false);
+                    std::filesystem::remove(marker, ec);
+                    return std::unexpected(ok.error());
+                }
+            }
         }
         report.Seconds = Since(startedAt);
 
         // Nothing learned here belongs in the .i64: the store is the output, and a saved database
-        // would differ from the one an interactive session expects.
+        // would differ from the one an interactive session expects. Closed before the last write
+        // so the gigabytes IDA holds are gone while SQLite finishes.
         close_database(false);
 
-        std::filesystem::create_directories(options.StoreDir, ec);
-        const auto storePath = StorePath(options.StoreDir, options.ImageName);
-        std::filesystem::remove(storePath, ec);
+        if (auto ok = flush(); !ok)
         {
-            auto store = Store::Database::Open(storePath, Store::Database::Mode::ReadWrite);
-            if (!store)
-            {
-                return std::unexpected(store.error());
-            }
-            if (auto ok = CreateStore(*store, options.ImagePath, options.Build, report.IdaVersion); !ok)
-            {
-                return std::unexpected(ok.error());
-            }
-            if (auto ok = WriteRows(*store, rows, names); !ok)
-            {
-                return std::unexpected(ok.error());
-            }
+            std::filesystem::remove(marker, ec);
+            return std::unexpected(ok.error());
         }
+        if (auto ok = MarkComplete(*store); !ok)
+        {
+            std::filesystem::remove(marker, ec);
+            return std::unexpected(ok.error());
+        }
+
+        // Read back rather than tallied along the way: a resumed run attempts only the functions
+        // its predecessor did not reach, so counters it kept would describe the last slice and
+        // print it as the image.
+        auto coverage = ReadCoverage(*store);
+        if (!coverage)
+        {
+            std::filesystem::remove(marker, ec);
+            return std::unexpected(coverage.error());
+        }
+        report.Decompiled = coverage->Decompiled;
+        report.TooBig     = coverage->TooBig;
+        report.Failures   = coverage->Attempted - coverage->Decompiled - coverage->TooBig;
+        report.Lines      = coverage->Lines;
+
+        store.reset();
+        std::filesystem::remove(marker, ec);
+
         // Measured only after the connection closes. Under WAL the rows sit in the -wal file
         // until a checkpoint, and SQLite checkpoints on its own once that file passes about
         // 4 MB -- so measuring while the database is open reported the real size for a large

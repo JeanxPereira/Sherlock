@@ -266,6 +266,16 @@ if(SHERLOCK_IDA_FOUND)
             ENVIRONMENT "SHERLOCK_HEXRAYS_WORKER=$<TARGET_FILE:SherlockHexRays>;SHERLOCK_IDA_DIR=${SHERLOCK_IDA_DIR}"
             TIMEOUT 600)
 
+    # What an interruption costs. The gate copies the smallest tower out of the corpus, kills the
+    # worker once a batch has landed and runs it again with --resume, so it needs no fixture and
+    # leaves no database beside the real image. TemplateKit decompiles in about twenty seconds,
+    # which is the head start the kill needs.
+    add_test(NAME Sherlock.HexRaysResume
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysResumeGate.py)
+    set_tests_properties(Sherlock.HexRaysResume PROPERTIES
+            ENVIRONMENT "SHERLOCK_HEXRAYS_WORKER=$<TARGET_FILE:SherlockHexRays>;SHERLOCK_IDA_DIR=${SHERLOCK_IDA_DIR};SHERLOCK_RESUME_IMAGE=${SHERLOCK_CORPUS}/${SHERLOCK_BUILD}/extracted/dylibs/TemplateKit"
+            TIMEOUT 1800)
+
     # `fn` reads both layers, so it needs the facts store AND one exported image.
     add_test(NAME Sherlock.HexRaysQueryGate
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysQueryGate.py)
