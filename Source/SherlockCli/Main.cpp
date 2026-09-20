@@ -230,7 +230,10 @@ int main(int argc, char** argv)
                             invocation->Command == "calls" || invocation->Command == "refs" ||
                             invocation->Command == "fn";
     const bool documentsQuery = invocation->Command == "find" || invocation->Command == "laudo";
-    if ((factsQuery || invocation->Command == "status") && invocation->Store.empty())
+    // grep reads layer 2 and the catalog, and never the cache: a text search over stored
+    // pseudocode needs no address to resolve and no image to map.
+    const bool grepQuery = invocation->Command == "grep";
+    if ((factsQuery || grepQuery || invocation->Command == "status") && invocation->Store.empty())
     {
         PrintVerdict({Cli::VerdictKind::NotVerified, 0, "no store path; pass --store or set SHERLOCK_STORE", 0, 0},
                      invocation->Json);
@@ -295,6 +298,24 @@ int main(int argc, char** argv)
         {
             return Cli::ExitCode(verdict);
         }
+        PrintVerdict(verdict, invocation->Json, output);
+        return Cli::ExitCode(verdict);
+    }
+    if (grepQuery)
+    {
+        if (invocation->Positional.empty())
+        {
+            PrintVerdict({Cli::VerdictKind::NotVerified, 0, "no pattern given", 0, 0},
+                         invocation->Json, output);
+            return 2;
+        }
+        if (!printHeader())
+        {
+            return 2;
+        }
+        const auto verdict = Cli::RunGrep(env, invocation->Positional.front(), invocation->Images,
+                                          invocation->IgnoreCase,
+                                          static_cast<std::size_t>(invocation->Limit));
         PrintVerdict(verdict, invocation->Json, output);
         return Cli::ExitCode(verdict);
     }

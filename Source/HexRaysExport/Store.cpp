@@ -378,6 +378,49 @@ namespace Sherlock::HexRaysExport
         return out;
     }
 
+    Expected<void> ForEachPseudocode(Store::Database& db,
+                                     const std::function<bool(std::uint64_t, std::string_view)>& visit)
+    {
+        auto read = db.Prepare("SELECT Function, Pseudocode, Plain FROM Decompilation "
+                               "WHERE Pseudocode IS NOT NULL AND Plain > 0 ORDER BY Function");
+        if (!read)
+        {
+            return std::unexpected(read.error());
+        }
+        for (;;)
+        {
+            auto row = read->Step();
+            if (!row)
+            {
+                return std::unexpected(row.error());
+            }
+            if (!*row)
+            {
+                return {};
+            }
+            auto text = Decompress(read->Blob(1), static_cast<std::size_t>(read->Int(2)));
+            if (!text)
+            {
+                return std::unexpected(text.error());
+            }
+            if (!visit(static_cast<std::uint64_t>(read->Int(0)), *text))
+            {
+                return {};
+            }
+        }
+    }
+
+    Expected<std::uint64_t> CountWithoutPseudocode(Store::Database& db)
+    {
+        auto count = db.ScalarInt("SELECT count(*) FROM Decompilation "
+                                  "WHERE Pseudocode IS NULL OR Plain = 0");
+        if (!count)
+        {
+            return std::unexpected(count.error());
+        }
+        return static_cast<std::uint64_t>(*count);
+    }
+
     Expected<Coverage> ReadCoverage(Store::Database& db)
     {
         auto decompiled = db.ScalarInt("SELECT count(*) FROM Decompilation WHERE Status = 'Ok'");

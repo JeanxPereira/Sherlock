@@ -9,6 +9,7 @@
 #include <Store/Database.h>
 #include <Store/Schema.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
@@ -129,6 +130,18 @@ namespace Sherlock::Cli
             const std::string    owned(text);
             const std::uint64_t  value    = std::strtoull(owned.c_str(), &dummy, 16);
             return dummy != nullptr && *dummy == '\0' ? std::optional<std::uint64_t>(value) : std::nullopt;
+        }
+
+        // ASCII only, and deliberately: an identifier in pseudocode is ASCII, and a locale-aware
+        // fold would make the same search answer differently on two machines.
+        std::string Lowered(std::string_view text)
+        {
+            std::string out(text);
+            for (char& c : out)
+            {
+                if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            }
+            return out;
         }
 
         std::vector<std::string_view> SplitLines(std::string_view text)
@@ -1065,6 +1078,180 @@ namespace Sherlock::Cli
 
         Emit(env, std::format("layer 1: no function contains 0x{:x}", address));
         return {VerdictKind::Empty, 0, "no function contains this address", read, total};
+    }
+
+    Verdict RunGrep(const QueryEnvironment& env, std::string_view pattern,
+                    const std::vector<std::string>& images, bool ignoreCase, std::size_t limit)
+    {
+        if (pattern.empty())
+        {
+            return {VerdictKind::NotVerified, 0, "no pattern given", 0, 0};
+        }
+
+        auto catalog = Store::Database::Open(env.Store / "Catalog.db", Store::Database::Mode::ReadOnly);
+        if (!catalog)
+        {
+            return {VerdictKind::NotVerified, 0, catalog.error().Format(), 0, 0};
+        }
+        const auto catalogUuid = ValidateCatalog(*catalog);
+        if (!catalogUuid)
+        {
+            return {VerdictKind::NotVerified, 0, catalogUuid.error().Format(), 0, 0};
+        }
+        const auto rows = LoadImages(*catalog);
+        if (!rows)
+        {
+            return {VerdictKind::NotVerified, 0, rows.error().Format(), 0, 0};
+        }
+
+        const std::string needle = ignoreCase ? Lowered(pattern) : std::string(pattern);
+        std::size_t hits = 0, searchedImages = 0, selectedImages = 0;
+        std::uint64_t searchedFunctions = 0, refused = 0;
+        std::vector<std::string> withoutLayerTwo, partial;
+        bool truncated = false;
+
+        // The selected set is built before the walk, so that a limit which stops the walk early
+        // cannot also shorten the list of what went unexamined. An image the search never reached
+        // is a gap exactly like an image with no layer 2, and the two are reported side by side.
+        std::vector<std::string> selected;
+        for (const auto& image : *rows)
+        {
+            const auto basename = std::filesystem::path(image.Path).filename().string();
+            if (images.empty() ||
+                std::find(images.begin(), images.end(), basename) != images.end())
+            {
+                selected.push_back(basename);
+            }
+        }
+        selectedImages = selected.size();
+
+        std::vector<std::string> unreached;
+        for (std::size_t index = 0; index < selected.size(); ++index)
+        {
+            const auto& basename = selected[index];
+            if (truncated)
+            {
+                unreached.push_back(basename);
+                continue;
+            }
+
+            const auto storePath = HexRaysExport::StorePath(env.Store / "Images", basename);
+            std::error_code exists;
+            if (!std::filesystem::is_regular_file(storePath, exists))
+            {
+                withoutLayerTwo.push_back(basename);
+                continue;
+            }
+            auto layerTwo = Store::Database::Open(storePath, Store::Database::Mode::ReadOnly);
+            if (!layerTwo || !HexRaysExport::CheckStoreSchema(*layerTwo))
+            {
+                withoutLayerTwo.push_back(basename);
+                continue;
+            }
+
+            // A partial store is searchable and incomplete at the same time, which is the worst
+            // shape for a zero: it answers for the functions it holds and is silent about the
+            // rest. Named here rather than treated as whole.
+            if (auto whole = HexRaysExport::IsComplete(*layerTwo); whole && !*whole)
+            {
+                auto held = HexRaysExport::ReadCoverage(*layerTwo);
+                partial.push_back(std::format("{} ({} function(s) so far)", basename,
+                                              held ? held->Attempted : 0));
+            }
+            if (auto missing = HexRaysExport::CountWithoutPseudocode(*layerTwo))
+            {
+                refused += *missing;
+            }
+
+            ++searchedImages;
+            const auto walked = HexRaysExport::ForEachPseudocode(
+                *layerTwo, [&](std::uint64_t address, std::string_view text) {
+                    ++searchedFunctions;
+                    std::size_t number = 0;
+                    for (const auto& line : SplitLines(text))
+                    {
+                        ++number;
+                        const bool found = ignoreCase ? Lowered(line).find(needle) != std::string::npos
+                                                      : line.find(needle) != std::string_view::npos;
+                        if (!found)
+                        {
+                            continue;
+                        }
+                        ++hits;
+                        if (limit > 0 && hits > limit)
+                        {
+                            truncated = true;
+                            return false;
+                        }
+                        Emit(env, std::format("{} 0x{:x}:{}: {}", basename, address, number, line));
+                    }
+                    return true;
+                });
+            if (!walked)
+            {
+                return {VerdictKind::NotVerified, 0, walked.error().Format(),
+                        searchedImages, selectedImages};
+            }
+        }
+
+        if (truncated)
+        {
+            --hits;
+            Emit(env, std::format("stopped at {} hit(s); the rest is not searched -- raise --limit",
+                                  limit));
+        }
+        // The zero rule, and this command's whole reason for stating it: an image with no layer 2
+        // is silent in exactly the way an image without the pattern is, so a reader who is not
+        // told cannot tell "not there" from "never looked".
+        if (!withoutLayerTwo.empty())
+        {
+            std::string names;
+            for (const auto& name : withoutLayerTwo)
+            {
+                names += (names.empty() ? "" : " ") + name;
+            }
+            Emit(env, std::format("not searched: {} -- no layer 2 there; build it with: Sherlock "
+                                  "build hexrays --store {} --images {}",
+                                  names, env.Store.string(), names));
+        }
+        if (!unreached.empty())
+        {
+            std::string names;
+            for (const auto& name : unreached)
+            {
+                names += (names.empty() ? "" : " ") + name;
+            }
+            Emit(env, std::format("not reached: {} -- the limit stopped the search before these, "
+                                  "and they are not evidence of anything", names));
+        }
+        for (const auto& image : partial)
+        {
+            Emit(env, std::format("partial: {} -- an interrupted export; what it has not reached "
+                                  "is not searched", image));
+        }
+        if (refused > 0)
+        {
+            Emit(env, std::format("{} function(s) in the searched images carry no pseudocode -- "
+                                  "the decompiler refused them, and no text search reaches inside",
+                                  refused));
+        }
+        // The blind spot that makes this command's zero dangerous, printed on every search rather
+        // than only on an empty one: layer 2 decompiles a slice carved out of the cache, so a call
+        // leaving the image reads as MEMORY[0x...] with no symbol on it. A name defined in another
+        // image is therefore UNFINDABLE here however many times it is called -- measured against a
+        // known fact, `ColorScheme.dark` at 0x22f4da22c is inside CampoUIInternal's pseudocode and
+        // this search does not see it. Reading such a zero as absence is the error the line exists
+        // to prevent; the disassembly route resolves those names.
+        Emit(env, std::format("searched {} function(s) in {} image(s); a name from ANOTHER image is "
+                              "not findable here -- cross-image calls read as MEMORY[0x...], so use "
+                              "fn --asm or References/scripts/fn.py --disasm for those",
+                              searchedFunctions, searchedImages));
+
+        if (hits == 0)
+        {
+            return {VerdictKind::Empty, 0, {}, searchedImages, selectedImages};
+        }
+        return {VerdictKind::Found, hits, {}, searchedImages, selectedImages};
     }
 
     Verdict RunStatus(const QueryEnvironment& env)

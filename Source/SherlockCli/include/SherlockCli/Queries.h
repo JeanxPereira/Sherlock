@@ -43,5 +43,13 @@ namespace Sherlock::Cli
     Verdict RunFunction(const QueryEnvironment& env, const DyldSharedCache::Cache* cache,
                         std::uint64_t address, bool disassemble);
 
+    // grep: one pattern over layer 2's pseudocode, across every image or the ones `images` names.
+    // It answers the question layer 2 exists for and grep on disk cannot reach -- "which function
+    // mentions this" -- and it is the one query whose ZERO is dangerous, because an image with no
+    // layer 2 is silent in exactly the way an image without the pattern is. Every image it could
+    // not read is named in the output, and so is the number of functions the decompiler refused.
+    Verdict RunGrep(const QueryEnvironment& env, std::string_view pattern,
+                    const std::vector<std::string>& images, bool ignoreCase, std::size_t limit);
+
     Verdict RunStatus(const QueryEnvironment& env);
 }

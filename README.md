@@ -85,6 +85,24 @@ a resume that never runs twice.
 `fn <address>` answers from layer 2 and says so; with `--asm` it disassembles layer 1 instead. An
 address layer 2 does not cover prints the `build hexrays` command that would cover it.
 
+    Sherlock grep <pattern> [--images A B] [--ignore-case] [--limit N]
+
+`grep` searches layer 2's pseudocode across the images, which is the question `fn` cannot answer
+because `fn` needs the address the search is looking for. It answers in seconds -- 170 000
+functions in four -- and prints `<image> <address>:<line>: <text>`.
+
+**Its zero is the dangerous one, and it is answered case by case.** Four different silences read
+identically in a text search, so every run names them: images with no layer 2 (with the command
+that builds them), images a `--limit` stopped the walk before, functions the decompiler refused,
+and the one a reader cannot guess -- **a name defined in another image cannot be found here at
+all**, because the carved slice reads its calls as `MEMORY[0x...]` with no symbol on them. That
+last one is measured rather than assumed: `ColorScheme.dark` is initialized inside
+CampoUIInternal at `0x22f4da22c`, and `grep ColorScheme --images CampoUIInternal` finds nothing.
+For a cross-image name the route is `fn --asm` or `References/scripts/fn.py --disasm`.
+
+The verdict's coverage pair counts images SELECTED over images READ, so a walk cut short still
+reports everything it owed an answer for.
+
 **Pseudocode locates.** It never closes a decoded value on its own: that needs a layer-1 reading
 or an instrument that prints coverage, and `lint_instruments.py` enforces it.
 

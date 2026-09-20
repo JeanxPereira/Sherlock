@@ -81,7 +81,7 @@ namespace Sherlock::Cli
         if (argc < 2)
         {
             return Fail(DiagnosticCode::Usage, Severity::NotVerified, "ParseArguments", "argv", "no command given",
-                        "pass a command: build, q, callers, calls, refs, status, --version");
+                        "pass a command: build, q, callers, calls, refs, fn, grep, status, --version");
         }
         std::vector<std::string> args(argv + 1, argv + argc);
 
@@ -205,6 +205,19 @@ namespace Sherlock::Cli
             else if (arg == "--asm")
             {
                 invocation.Asm = true;
+            }
+            else if (arg == "--ignore-case")
+            {
+                invocation.IgnoreCase = true;
+            }
+            else if (arg == "--limit")
+            {
+                if (i + 1 >= args.size())
+                {
+                    return Fail(DiagnosticCode::Malformed, Severity::NotVerified, "ParseArguments", arg,
+                                "--limit takes a count", "pass --limit <hits>");
+                }
+                invocation.Limit = std::strtoull(args[++i].c_str(), nullptr, 10);
             }
             else if (arg == "--full")
             {

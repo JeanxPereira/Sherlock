@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -87,4 +88,15 @@ namespace Sherlock::HexRaysExport
 
     Expected<std::optional<DecompilationRow>> ReadFunction(Store::Database& db, std::uint64_t address);
     Expected<Coverage>                        ReadCoverage(Store::Database& db);
+
+    // Every decompiled function in the store, one at a time. A text search over an image must not
+    // hold the whole of its pseudocode at once -- AppKit's is tens of megabytes decompressed.
+    // The visitor stops the walk by returning false.
+    Expected<void> ForEachPseudocode(Store::Database& db,
+                                     const std::function<bool(std::uint64_t, std::string_view)>& visit);
+
+    // Functions the store holds with no pseudocode, because the decompiler refused them. A text
+    // search cannot see inside these, and a search reporting no hits has to say how many there
+    // are: otherwise its zero claims something it never looked at.
+    Expected<std::uint64_t> CountWithoutPseudocode(Store::Database& db);
 }

@@ -25,6 +25,10 @@ namespace Sherlock::Cli
         bool                         AllTowers = false;
         bool                         Full      = false;
         bool                         Asm       = false;  // fn only: layer 1's disassembly
+        // grep only. The cap exists because one loose pattern over the whole cache can print more
+        // than a terminal holds, and a truncated answer must say it was truncated.
+        bool                         IgnoreCase = false;
+        std::uint64_t                Limit      = 200;
         bool                         Json      = false;
         bool                         Resume    = false;
         unsigned                     Workers   = 0;

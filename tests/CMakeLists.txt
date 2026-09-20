@@ -147,8 +147,8 @@ set_tests_properties(Sherlock.BuildDocuments PROPERTIES FIXTURES_SETUP SherlockD
 # BIN_SEALS moved 2144 -> 2207 in this same measurement: WalkSource (and measure_document_counts.py's
 # own walk) now carry the shader extensions (.frag/.vert/.glsl) that SealDump and lint_seals.py
 # already scanned -- the built store was missing every shader seal until this fix.
-set(SHERLOCK_DOCUMENTS_RE_SECTIONS 2713)
-set(SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS 209)
+set(SHERLOCK_DOCUMENTS_RE_SECTIONS 2719)
+set(SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS 211)
 set(SHERLOCK_DOCUMENTS_BIN_SEALS 2207)
 
 add_test(NAME Sherlock.DocumentsExactCounts
@@ -275,6 +275,15 @@ if(SHERLOCK_IDA_FOUND)
     set_tests_properties(Sherlock.HexRaysResume PROPERTIES
             ENVIRONMENT "SHERLOCK_HEXRAYS_WORKER=$<TARGET_FILE:SherlockHexRays>;SHERLOCK_IDA_DIR=${SHERLOCK_IDA_DIR};SHERLOCK_RESUME_IMAGE=${SHERLOCK_CORPUS}/${SHERLOCK_BUILD}/extracted/dylibs/TemplateKit"
             TIMEOUT 1800)
+
+    # grep needs no IDA of its own -- it reads stores -- but it needs a store with layer 2 in it,
+    # and the export fixture is what produces one.
+    add_test(NAME Sherlock.HexRaysGrep
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/HexRaysGrepGate.py)
+    set_tests_properties(Sherlock.HexRaysGrep PROPERTIES
+            FIXTURES_REQUIRED SherlockHexRays
+            TIMEOUT 1800
+            ENVIRONMENT "SHERLOCK_CLI=$<TARGET_FILE:Sherlock>;SHERLOCK_STORE=${SHERLOCK_STORE_DIR}")
 
     # `fn` reads both layers, so it needs the facts store AND one exported image.
     add_test(NAME Sherlock.HexRaysQueryGate
