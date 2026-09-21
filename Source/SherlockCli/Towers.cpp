@@ -1,5 +1,6 @@
 // Sherlock — tools/Sherlock/Source/SherlockCli/Towers.cpp
-// nlohmann::json read of towers.json's "build" and "image" keys.
+// nlohmann::json read of towers.json's "build", "image" and
+// "indexed_non_tower_image" keys.
 #include <SherlockCli/Towers.h>
 
 #include <nlohmann/json.hpp>
@@ -55,6 +56,24 @@ namespace Sherlock::Cli
             if (path.is_string() && !path.get<std::string>().empty())
             {
                 towers.push_back({tower, path.get<std::string>()});
+            }
+        }
+
+        // WHAT THIS STORE INDEXES IS NOT WHAT AQUAKIT REIMPLEMENTS. `image` is
+        // the tower map, and a tower is a directory under `Source/`;
+        // `owners.py` and `lint_seals.py` both derive the tower set from it, so
+        // an image that is only ever READ must not be listed there. It is
+        // listed here instead, and this store carries both -- a question whose
+        // answer lives in CoreUI is not answerable from the towers alone.
+        if (const auto extra = json->find("indexed_non_tower_image");
+            extra != json->end() && extra->is_object())
+        {
+            for (const auto& [name, path] : extra->items())
+            {
+                if (path.is_string() && !path.get<std::string>().empty())
+                {
+                    towers.push_back({name, path.get<std::string>()});
+                }
             }
         }
         return towers;

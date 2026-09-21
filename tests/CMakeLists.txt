@@ -83,7 +83,7 @@ endfunction()
 
 sherlock_query_test(QueryOwner    q 0x240622d98                          MATCH "DesignLibrary")
 sherlock_query_test(QueryHeader   q 0x240622d98                          MATCH "build 26A5416b")
-sherlock_query_test(QueryOwnerCoverage q 0x240622d98                     MATCH "verdict: FOUND 1  coverage 22798615/22799028")
+sherlock_query_test(QueryOwnerCoverage q 0x240622d98                     MATCH "verdict: FOUND 1  coverage 23102602/23103016")
 sherlock_query_test(QueryCallerSummary q 0x2230edebc                     MATCH "callers: 5")
 sherlock_query_test(QueryUnmapped q 0x7ffff0000                          MATCH "verdict: NOT VERIFIED")
 sherlock_query_test(QueryCallers  callers 0x2230edebc                    MATCH "0x240679e58")
