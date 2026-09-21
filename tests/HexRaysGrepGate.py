@@ -119,6 +119,37 @@ if "outside the" not in found:
     failures.append("6c: the search does not declare that a call into an unindexed image still "
                     "has no name to match")
 
+# 7. AN IMAGE NAME THE CATALOG DOES NOT HAVE IS AN ERROR, not an empty search.
+#    A misspelling used to select nothing and report `verdict: EMPTY` with
+#    `coverage 0/0`, which a reader takes for "the pattern is not in the
+#    corpus" -- the one confusion every other line of this command's output
+#    exists to prevent. It was found by a real `--images A,B`, which the
+#    parser then read as one name.
+code, unknown = run(PRESENT, "--images", "ZzNotAnImage")
+print(unknown)
+if "verdict: NOT VERIFIED" not in unknown:
+    failures.append(f"7: an unknown image name did not read as NOT VERIFIED: "
+                    f"{unknown.strip()[-200:]!r}")
+if "ZzNotAnImage" not in unknown:
+    failures.append("7: the refusal does not name the image that was not found")
+if "DesignLibrary" not in unknown:
+    failures.append("7: the refusal does not list the images the catalog does hold")
+
+# 7b. And a comma-separated list is a LIST. The two spellings select the same
+#     images, so a reader who writes the natural one is not silently searching
+#     nothing.
+code, spaced = run(PRESENT, "--images", "DesignLibrary", "SwiftUI", "--limit", "3")
+code, commas = run(PRESENT, "--images", "DesignLibrary,SwiftUI", "--limit", "3")
+if "verdict: FOUND" not in commas:
+    failures.append(f"7b: a comma-separated image list found nothing: "
+                    f"{commas.strip()[-200:]!r}")
+def coverage(text):
+    line = next((l for l in text.splitlines() if l.startswith("verdict:")), "")
+    return line.rsplit(" ", 1)[-1] if "/" in line else ""
+if coverage(spaced) != coverage(commas):
+    failures.append(f"7b: the two spellings select different images "
+                    f"({coverage(spaced)} against {coverage(commas)})")
+
 if failures:
     for failure in failures:
         print(f"FAIL: {failure}")

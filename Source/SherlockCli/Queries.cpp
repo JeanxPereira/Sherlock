@@ -1453,6 +1453,28 @@ namespace Sherlock::Cli
         }
         selectedImages = selected.size();
 
+        // A NAME THAT MATCHES NO IMAGE IS AN ERROR, NOT AN EMPTY SEARCH. Without
+        // this the misspelling searches nothing and reports `verdict: EMPTY`,
+        // which reads as "the pattern is not in the corpus" -- the exact
+        // confusion the rest of this command's reporting exists to prevent.
+        // Measured: `--images AppKit,DesignLibrary` selected zero images and
+        // said EMPTY with `coverage 0/0`.
+        for (const auto& wanted : images)
+        {
+            if (std::find(selected.begin(), selected.end(), wanted) != selected.end()) continue;
+
+            std::string known;
+            for (const auto& image : *rows)
+            {
+                if (!known.empty()) known += ", ";
+                known += std::filesystem::path(image.Path).filename().string();
+            }
+            return {VerdictKind::NotVerified, 0,
+                    std::format("--images names {} and the catalog has no such image; it holds {}",
+                                wanted, known),
+                    0, 0};
+        }
+
         std::vector<std::string> unreached;
         for (std::size_t index = 0; index < selected.size(); ++index)
         {

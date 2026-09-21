@@ -193,9 +193,19 @@ namespace Sherlock::Cli
             }
             else if (arg == "--images")
             {
+                // Space-separated AND comma-separated, because both are what a
+                // reader writes and a name with a comma in it is not an image.
                 while (i + 1 < args.size() && !args[i + 1].starts_with("--"))
                 {
-                    invocation.Images.push_back(args[++i]);
+                    const std::string& list = args[++i];
+                    for (std::size_t at = 0; at <= list.size();)
+                    {
+                        const auto comma = list.find(',', at);
+                        const auto end   = comma == std::string::npos ? list.size() : comma;
+                        if (end > at) invocation.Images.push_back(list.substr(at, end - at));
+                        if (comma == std::string::npos) break;
+                        at = comma + 1;
+                    }
                 }
             }
             else if (arg == "--resume")
