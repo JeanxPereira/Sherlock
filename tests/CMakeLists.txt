@@ -147,9 +147,9 @@ set_tests_properties(Sherlock.BuildDocuments PROPERTIES FIXTURES_SETUP SherlockD
 # BIN_SEALS moved 2144 -> 2207 in this same measurement: WalkSource (and measure_document_counts.py's
 # own walk) now carry the shader extensions (.frag/.vert/.glsl) that SealDump and lint_seals.py
 # already scanned -- the built store was missing every shader seal until this fix.
-set(SHERLOCK_DOCUMENTS_RE_SECTIONS 2815)
-set(SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS 215)
-set(SHERLOCK_DOCUMENTS_BIN_SEALS 2297)
+set(SHERLOCK_DOCUMENTS_RE_SECTIONS 2821)
+set(SHERLOCK_DOCUMENTS_CONCEPT_SECTIONS 216)
+set(SHERLOCK_DOCUMENTS_BIN_SEALS 2299)
 
 add_test(NAME Sherlock.DocumentsExactCounts
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/DocumentsExactCounts.py
