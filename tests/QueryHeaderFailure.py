@@ -6,6 +6,8 @@ import subprocess
 import sys
 import tempfile
 
+from schema_version import STORE_SCHEMA_VERSION
+
 
 def create_catalog(path: pathlib.Path, scenario: str) -> str:
     expected_by_scenario = {
@@ -19,12 +21,13 @@ def create_catalog(path: pathlib.Path, scenario: str) -> str:
         if scenario == "meta-step":
             catalog.execute(
                 "CREATE VIEW Meta AS SELECT 'Kind' AS Key, abs(-9223372036854775808) AS Value "
-                "UNION ALL SELECT 'SchemaVersion', '1' UNION ALL SELECT 'CacheUuid', 'cache'"
+                f"UNION ALL SELECT 'SchemaVersion', '{STORE_SCHEMA_VERSION}' "
+                "UNION ALL SELECT 'CacheUuid', 'cache'"
             )
         elif scenario == "images":
             catalog.execute("CREATE TABLE Meta (Key TEXT PRIMARY KEY, Value TEXT NOT NULL)")
             catalog.executemany("INSERT INTO Meta VALUES (?, ?)", [
-                ("Kind", "Catalog"), ("SchemaVersion", "1"), ("CacheUuid", "cache"),
+                ("Kind", "Catalog"), ("SchemaVersion", str(STORE_SCHEMA_VERSION)), ("CacheUuid", "cache"),
                 ("Build", "26A5416b"), ("SherlockVersion", "0.1.0")])
         catalog.commit()
     finally:

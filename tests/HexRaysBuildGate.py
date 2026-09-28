@@ -18,6 +18,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from schema_version import STORE_SCHEMA_VERSION
+
 sherlock = os.environ["SHERLOCK_CLI"]
 python = sys.executable
 
@@ -75,7 +77,7 @@ def make_catalog(store: Path, images) -> None:
         Read INTEGER NOT NULL, Total INTEGER NOT NULL, PRIMARY KEY(Image, Layer)) WITHOUT ROWID;
     """)
     db.executemany("INSERT OR REPLACE INTO Meta VALUES(?,?)",
-                   [("Kind", "Catalog"), ("SchemaVersion", "1"), ("Build", "26A5416b"),
+                   [("Kind", "Catalog"), ("SchemaVersion", str(STORE_SCHEMA_VERSION)), ("Build", "26A5416b"),
                     ("CacheUuid", "gate")])
     for name, state in images:
         # Image.Name is the layer-1 STORE's file name, with its .db, and the image itself is the

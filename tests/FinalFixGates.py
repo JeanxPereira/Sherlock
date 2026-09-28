@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from schema_version import STORE_SCHEMA_VERSION
+
 
 def schema(db: sqlite3.Connection, kind: str, uuid: str = "cache-a", image: str = "") -> None:
     db.executescript("""
@@ -24,7 +26,7 @@ def schema(db: sqlite3.Connection, kind: str, uuid: str = "cache-a", image: str 
         CREATE TABLE Call(Site INTEGER PRIMARY KEY, Caller INTEGER NOT NULL,
             Target INTEGER NOT NULL, Island INTEGER, Via TEXT NOT NULL);
     """)
-    values = [("Kind", kind), ("SchemaVersion", "1"), ("SherlockVersion", "0.1.0"),
+    values = [("Kind", kind), ("SchemaVersion", str(STORE_SCHEMA_VERSION)), ("SherlockVersion", "0.1.0"),
               ("CacheUuid", uuid)]
     if kind == "Catalog":
         values.append(("Build", "test"))
@@ -78,7 +80,7 @@ def main() -> int:
     if refused.returncode != 2 or json.loads(refused.stdout).get("verdict") != "NOT VERIFIED":
         print("FAIL incompatible catalog schema was accepted", refused.returncode, refused.stdout)
         return 1
-    catalog.execute("UPDATE Meta SET Value = '1' WHERE Key = 'SchemaVersion'")
+    catalog.execute("UPDATE Meta SET Value = ? WHERE Key = 'SchemaVersion'", (str(STORE_SCHEMA_VERSION),))
     catalog.execute("INSERT INTO Image VALUES(?, ?, NULL, 1, 'FactsDone', NULL, '0.1.0', NULL)",
                     ("/right/image", "image.db"))
     catalog.execute("INSERT INTO Coverage VALUES('/right/image', 'Facts', 'instructions', 1, 1)")
