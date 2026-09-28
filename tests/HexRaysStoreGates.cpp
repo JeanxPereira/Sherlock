@@ -28,7 +28,7 @@ namespace
     void GateVersionsAreIndependent()
     {
         static_assert(HexRaysExport::kHexRaysSchemaVersion == 1);
-        static_assert(Store::kSchemaVersion == 1);
+        static_assert(Store::kSchemaVersion == 2);
         static_assert(Store::kDocumentsSchemaVersion == 1);
         Expect(&HexRaysExport::kHexRaysSchemaVersion != &Store::kSchemaVersion,
                "layer 2's schema version is its own constant, not layer 1's");

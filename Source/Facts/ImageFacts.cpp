@@ -3,10 +3,12 @@
 #include <Facts/BranchIsland.h>
 #include <Facts/ImageFacts.h>
 #include <Facts/LiteralReaders.h>
+#include <Facts/VirtualCall.h>
 
 #include <Store/Schema.h>
 
 #include <algorithm>
+#include <map>
 #include <unordered_map>
 
 namespace Sherlock::Facts
@@ -69,6 +71,10 @@ namespace Sherlock::Facts
         LiteralTracker                      literals;
         std::unordered_map<std::uint64_t, std::optional<std::uint64_t>> islandCache;
         std::optional<Foundation::Diagnostic>                            islandError;
+        // Keyed by (slot, D): every blraa/braa site sharing a (slot, D) pair reaches the same
+        // family, and QuartzCore-sized images repeat a handful of pairs across many sites.
+        std::map<std::pair<std::uint64_t, std::uint64_t>, std::vector<VirtualCallCandidate>> vcallFamilyCache;
+        std::optional<Foundation::Diagnostic>                                                 vcallError;
 
         const auto coverage = disassembler.Stream(*bytes, text->Address, [&](const Instruction& ins) {
             const std::uint64_t caller = CallerOf(facts.Functions, ins.Address);
@@ -94,6 +100,43 @@ namespace Sherlock::Facts
                     }
                 }
                 facts.Literals.push_back(std::move(row));
+            }
+
+            if (ins.Mnemonic == "blraa" || ins.Mnemonic == "braa")
+            {
+                // A bounded lookback, not the whole function: vcall.py's own bulk scan
+                // (--callers) uses the same 0x100-byte window, since the mov/movk/add/ldr chain
+                // that sets up a PAC vtable dispatch sits immediately upstream of it.
+                const std::uint64_t lookback = (ins.Address - text->Address >= 0x100) ? ins.Address - 0x100
+                                                                                       : text->Address;
+                const std::uint64_t windowStart = std::max(caller, lookback);
+                const auto           pattern    = ExtractVirtualCallPattern(cache, disassembler, windowStart, ins.Address);
+                if (!pattern)
+                {
+                    vcallError = pattern.error();
+                    return;
+                }
+                if (*pattern)
+                {
+                    const auto key     = std::make_pair((*pattern)->SlotOffset, (*pattern)->Discriminator);
+                    auto        cached = vcallFamilyCache.find(key);
+                    if (cached == vcallFamilyCache.end())
+                    {
+                        auto family = ResolveVirtualCallFamily(cache, facts.Symbols, key.first, key.second);
+                        if (!family)
+                        {
+                            vcallError = family.error();
+                            return;
+                        }
+                        cached = vcallFamilyCache.emplace(key, std::move(*family)).first;
+                    }
+                    for (const auto& candidate : cached->second)
+                    {
+                        facts.VirtualCalls.push_back({ins.Address, key.first, key.second, candidate.Address,
+                                                      (*pattern)->Instruction, candidate.Symbol});
+                    }
+                }
+                return;
             }
 
             if (ins.Mnemonic != "bl")
@@ -150,6 +193,10 @@ namespace Sherlock::Facts
         if (islandError)
         {
             return std::unexpected(*islandError);
+        }
+        if (vcallError)
+        {
+            return std::unexpected(*vcallError);
         }
         return facts;
     }
@@ -230,8 +277,11 @@ namespace Sherlock::Facts
         auto callInsert = db.Prepare("INSERT INTO Call(Site, Caller, Target, Island, Via) VALUES(?1, ?2, ?3, ?4, ?5)");
         auto literalInsert =
             db.Prepare("INSERT INTO LiteralRef(Site, Target, Caller, Kind, Value) VALUES(?1, ?2, ?3, ?4, ?5)");
+        auto virtualCallInsert = db.Prepare(
+            "INSERT INTO VirtualCall(Image, Site, Instruction, SlotOffset, Discriminator, Candidate, "
+            "CandidateSymbol, Resolver) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)");
         for (const auto* statement : {&segmentInsert, &sectionInsert, &functionInsert, &symbolInsert, &callInsert,
-                                      &literalInsert})
+                                      &literalInsert, &virtualCallInsert})
         {
             if (!*statement)
             {
@@ -316,6 +366,19 @@ namespace Sherlock::Facts
             else if (auto ok = literalInsert->BindNull(5); !ok) return ok;
             if (auto ok = literalInsert->Step(); !ok) return std::unexpected(ok.error());
             if (auto ok = literalInsert->Reset(); !ok) return ok;
+        }
+        for (const auto& vcall : facts.VirtualCalls)
+        {
+            if (auto ok = virtualCallInsert->Bind(1, facts.Path); !ok) return ok;
+            if (auto ok = virtualCallInsert->Bind(2, static_cast<std::int64_t>(vcall.Site)); !ok) return ok;
+            if (auto ok = virtualCallInsert->Bind(3, vcall.Instruction); !ok) return ok;
+            if (auto ok = virtualCallInsert->Bind(4, static_cast<std::int64_t>(vcall.SlotOffset)); !ok) return ok;
+            if (auto ok = virtualCallInsert->Bind(5, static_cast<std::int64_t>(vcall.Discriminator)); !ok) return ok;
+            if (auto ok = virtualCallInsert->Bind(6, static_cast<std::int64_t>(vcall.Candidate)); !ok) return ok;
+            if (auto ok = virtualCallInsert->Bind(7, vcall.CandidateSymbol); !ok) return ok;
+            if (auto ok = virtualCallInsert->Bind(8, kVirtualCallResolver); !ok) return ok;
+            if (auto ok = virtualCallInsert->Step(); !ok) return std::unexpected(ok.error());
+            if (auto ok = virtualCallInsert->Reset(); !ok) return ok;
         }
 
         if (auto ok = tx->Commit(); !ok)

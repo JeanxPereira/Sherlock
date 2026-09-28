@@ -34,6 +34,11 @@ namespace Sherlock::Store
                 Target INTEGER NOT NULL, Island INTEGER, Via TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS LiteralRef(Site INTEGER NOT NULL, Target INTEGER NOT NULL, Caller INTEGER,
                 Kind TEXT NOT NULL, Value REAL, PRIMARY KEY(Site, Target)) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS VirtualCall(Image TEXT NOT NULL, Site INTEGER NOT NULL,
+                Instruction TEXT NOT NULL, SlotOffset INTEGER NOT NULL, Discriminator INTEGER NOT NULL,
+                Candidate INTEGER NOT NULL, CandidateSymbol TEXT NOT NULL, Resolver TEXT NOT NULL,
+                PRIMARY KEY(Site, Candidate),
+                CHECK (Discriminator BETWEEN 1 AND 65535), CHECK (SlotOffset % 8 = 0)) WITHOUT ROWID;
         )sql";
 
         constexpr std::string_view kImageIndexes = R"sql(
@@ -41,6 +46,7 @@ namespace Sherlock::Store
             CREATE INDEX IF NOT EXISTS CallCaller ON Call(Caller);
             CREATE INDEX IF NOT EXISTS LiteralRefTarget ON LiteralRef(Target);
             CREATE INDEX IF NOT EXISTS SymbolName ON Symbol(Name);
+            CREATE INDEX IF NOT EXISTS VirtualCallCandidate ON VirtualCall(Candidate);
         )sql";
 
         constexpr std::string_view kDocumentTables = R"sql(

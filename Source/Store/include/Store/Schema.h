@@ -9,7 +9,8 @@
 namespace Sherlock::Store
 {
     // Moves only when a table or a column changes; independent of the tool's own version.
-    inline constexpr int kSchemaVersion = 1;
+    // 2: the image store gains VirtualCall (arm64e PAC vtable dispatch sites).
+    inline constexpr int kSchemaVersion = 2;
     // Independent of kSchemaVersion (layer 1/2's catalog and image stores): a change to the
     // Documents.db tables must never force a rebuild of the already-built, expensive Facts
     // stores, and vice versa -- each layer's schema moves on its own decoding, not the other's.

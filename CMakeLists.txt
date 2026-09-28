@@ -50,7 +50,7 @@ sherlock_module(DyldSharedCache
 
 sherlock_module(Facts
     SOURCES ${S}/Facts/Disassembler.cpp ${S}/Facts/BranchIsland.cpp ${S}/Facts/LiteralReaders.cpp
-            ${S}/Facts/ImageFacts.cpp ${S}/Facts/Builder.cpp
+            ${S}/Facts/VirtualCall.cpp ${S}/Facts/ImageFacts.cpp ${S}/Facts/Builder.cpp
     LINKS Sherlock::DyldSharedCache Sherlock::Store capstone_static)
 
 sherlock_module(DocumentIndex

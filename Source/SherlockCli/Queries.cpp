@@ -1063,6 +1063,77 @@ namespace Sherlock::Cli
                owned->Image.CoverageTotal};
     }
 
+    Verdict RunVirtualCall(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::uint64_t site)
+    {
+        auto catalog = Store::Database::Open(env.Store / "Catalog.db", Store::Database::Mode::ReadOnly);
+        if (!catalog)
+        {
+            return {VerdictKind::NotVerified, 0, catalog.error().Format(), 0, 0};
+        }
+        const auto catalogUuid = ValidateCatalog(*catalog, &cache);
+        if (!catalogUuid) return {VerdictKind::NotVerified, 0, catalogUuid.error().Format(), 0, 0};
+        const auto rows = LoadImages(*catalog);
+        if (!rows)
+        {
+            return {VerdictKind::NotVerified, 0, rows.error().Format(), 0, 0};
+        }
+        const auto owned = Resolve(cache, *rows, site);
+        if (!owned)
+        {
+            if (!cache.IsMapped(site))
+            {
+                return {VerdictKind::NotVerified, 0, std::format("0x{:x} is not mapped", site), 0, 0};
+            }
+            Emit(env, "owner: (global cache data)");
+            return {VerdictKind::Empty, 0, {}, 0, 0};
+        }
+        if (owned->Image.State != "FactsDone")
+        {
+            return {VerdictKind::Partial, 0, std::format("image {} not built", owned->Image.Path), 0, 0};
+        }
+        auto db = OpenImage(env, owned->Image, *catalogUuid);
+        if (!db)
+        {
+            return {VerdictKind::NotVerified, 0, db.error().Format(), 0, 0};
+        }
+
+        auto statement = db->Prepare("SELECT Candidate, CandidateSymbol, SlotOffset, Discriminator, Instruction "
+                                     "FROM VirtualCall WHERE Site = ?1 ORDER BY Candidate");
+        if (!statement)
+        {
+            return {VerdictKind::NotVerified, 0, statement.error().Format(), owned->Image.CoverageRead,
+                    owned->Image.CoverageTotal};
+        }
+        if (auto bind = statement->Bind(1, static_cast<std::int64_t>(site)); !bind)
+        {
+            return {VerdictKind::NotVerified, 0, bind.error().Format(), owned->Image.CoverageRead,
+                    owned->Image.CoverageTotal};
+        }
+        std::size_t count = 0;
+        for (;;)
+        {
+            const auto row = statement->Step();
+            if (!row)
+            {
+                return {VerdictKind::NotVerified, 0, row.error().Format(), owned->Image.CoverageRead,
+                        owned->Image.CoverageTotal};
+            }
+            if (!*row) break;
+            if (count == 0)
+            {
+                Emit(env, std::format("  slot=0x{:x}  D=0x{:x}  {}", statement->Int(2), statement->Int(3),
+                                      statement->Text(4)));
+            }
+            ++count;
+            if (env.Full || count <= 10)
+            {
+                Emit(env, std::format("    0x{:x}  {}", statement->Int(0), statement->Text(1)));
+            }
+        }
+        return {count > 0 ? VerdictKind::Found : VerdictKind::Empty, count, {}, owned->Image.CoverageRead,
+               owned->Image.CoverageTotal};
+    }
+
     Verdict RunRefs(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::uint64_t address,
                     std::uint64_t end)
     {

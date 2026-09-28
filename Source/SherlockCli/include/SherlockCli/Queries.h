@@ -36,6 +36,8 @@ namespace Sherlock::Cli
     Verdict RunQuery(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::string_view target);
     Verdict RunCallers(const QueryEnvironment& env, std::uint64_t address);
     Verdict RunCalls(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::uint64_t address);
+    // vcall: the arm64e PAC virtual-dispatch family stored at a blraa/braa site (Facts::VirtualCall).
+    Verdict RunVirtualCall(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::uint64_t site);
     Verdict RunRefs(const DyldSharedCache::Cache& cache, const QueryEnvironment& env, std::uint64_t address,
                     std::uint64_t end);
     // fn: layer 2's pseudocode for the function containing the address, or layer 1's disassembly

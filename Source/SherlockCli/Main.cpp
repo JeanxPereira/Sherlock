@@ -228,7 +228,7 @@ int main(int argc, char** argv)
 
     const bool factsQuery = invocation->Command == "q" || invocation->Command == "callers" ||
                             invocation->Command == "calls" || invocation->Command == "refs" ||
-                            invocation->Command == "fn";
+                            invocation->Command == "fn" || invocation->Command == "vcall";
     const bool documentsQuery = invocation->Command == "find" || invocation->Command == "laudo";
     // grep reads layer 2 and the catalog, and never the cache: a text search over stored
     // pseudocode needs no address to resolve and no image to map.
@@ -240,7 +240,7 @@ int main(int argc, char** argv)
         return 2;
     }
     if ((invocation->Command == "q" || invocation->Command == "calls" || invocation->Command == "refs" ||
-         (invocation->Command == "fn" && invocation->Asm)) &&
+         invocation->Command == "vcall" || (invocation->Command == "fn" && invocation->Asm)) &&
         invocation->Cache.empty())
     {
         PrintVerdict({Cli::VerdictKind::NotVerified, 0, "no cache path; pass --cache or set SHERLOCK_CACHE", 0, 0},
@@ -386,6 +386,10 @@ int main(int argc, char** argv)
             if (invocation->Command == "calls")
             {
                 verdict = Cli::RunCalls(*cache, env, *address);
+            }
+            else if (invocation->Command == "vcall")
+            {
+                verdict = Cli::RunVirtualCall(*cache, env, *address);
             }
             else
             {

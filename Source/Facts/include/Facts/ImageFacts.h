@@ -4,6 +4,7 @@
 
 #include <DyldSharedCache/Cache.h>
 #include <Facts/Disassembler.h>
+#include <Facts/VirtualCall.h>
 #include <MachO/Image.h>
 #include <Store/Database.h>
 
@@ -35,6 +36,15 @@ namespace Sherlock::Facts
         std::optional<double>        Value;
     };
 
+    // One (site, candidate) pair of a resolved arm64e PAC virtual dispatch -- one row per member
+    // of the family Facts::ResolveVirtualCallFamily returns for that site's (slot, D).
+    struct VirtualCallRow
+    {
+        std::uint64_t Site = 0, SlotOffset = 0, Discriminator = 0, Candidate = 0;
+        std::string   Instruction;
+        std::string   CandidateSymbol;
+    };
+
     struct ImageFacts
     {
         std::string                      Path;
@@ -44,6 +54,7 @@ namespace Sherlock::Facts
         std::vector<MachO::SymbolEntry>  Symbols;
         std::vector<CallRow>             Calls;
         std::vector<LiteralRow>          Literals;
+        std::vector<VirtualCallRow>      VirtualCalls;
         StreamCoverage                   Coverage;
     };
 
