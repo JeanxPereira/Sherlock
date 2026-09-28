@@ -8,6 +8,8 @@
 #include <Store/Database.h>
 #include <Store/Schema.h>
 
+#include <array>
+#include <cstddef>
 #include <set>
 
 #include "SherlockHarness.h"
@@ -126,12 +128,48 @@ namespace
     constexpr std::uint64_t kExpectedDiscriminator = 0x6779;
     // A direct bl in the same neighbourhood -- never a virtual dispatch, so it must produce no row.
     constexpr std::uint64_t kSiteNegativeDirectBl = 0x18b2669c4;
+    // vcall.py's own self-test negative 2 (inside CA::WindowServer::Server::render_display_to_
+    // target): a real blraa (slot=0x8, D=0x5268) whose discriminator matches no __ZTV family
+    // anywhere in QuartzCore's own symbol table -- an honest EMPTY, not a guess, so no row either.
+    constexpr std::uint64_t kSiteNegativeEmptyFamily = 0x18b2ec880;
 
     void GateDiscriminatorSelfCheck()
     {
         // Cross-checked once in vcall.py's own module docstring against a real binary fact.
         ExpectEq(Facts::PtrauthStringDiscriminator("_ZN2CA3OGL11ImagingNode5applyEfPPNS0_7SurfaceEPf"),
                  std::uint64_t{0x6779}, "the ptrauth string discriminator reproduces the known D for ImagingNode::apply");
+    }
+
+    // A register-offset ldr (`ldr x8, [x16, x9]`) must never be read as a slot dereference: the
+    // offset field has no `#imm`, so vcall.py's _LDR_RE refuses to match it and falls through to
+    // the generic dest-invalidation instead of a fabricated offset -- the bug this gate closes let
+    // the tracker read `addr_of[base] + 0` for exactly this instruction shape. Each word below is
+    // hand-encoded and was verified against capstone directly (`ldr x8, [x16, x9]`,
+    // `movk x16, #0x1234, lsl #48`, and the known blraa word from vcall.py's own module docstring)
+    // before being trusted here.
+    void GateRegisterOffsetLdrNeverFabricatesSlot()
+    {
+        constexpr std::array<std::byte, 12> kCode = {
+            std::byte{0x08}, std::byte{0x6a}, std::byte{0x69}, std::byte{0xf8}, // ldr x8, [x16, x9]
+            std::byte{0x90}, std::byte{0x46}, std::byte{0xe2}, std::byte{0xf2}, // movk x16, #0x1234, lsl #48
+            std::byte{0x10}, std::byte{0x09}, std::byte{0x3f}, std::byte{0xd7}, // blraa x8, x16
+        };
+
+        auto disassembler = Facts::Disassembler::Create();
+        Expect(disassembler.has_value(), "the synthetic-code disassembler opens");
+        if (!disassembler)
+        {
+            return;
+        }
+        constexpr std::uint64_t kWindowStart = 0x1000;
+        constexpr std::uint64_t kSite        = kWindowStart + 8; // the blraa
+        const auto pattern = Facts::ExtractVirtualCallPatternFromCode(*disassembler, kCode, kWindowStart, kSite);
+        Expect(pattern.has_value(), "the synthetic-code pattern extraction runs");
+        if (!pattern)
+        {
+            return;
+        }
+        Expect(!pattern->has_value(), "a register-offset ldr upstream of blraa is refused, never a fabricated slot=0");
     }
 
     void GateQuartzCoreVirtualCallParity(const DyldSharedCache::Cache& cache, Facts::Disassembler& disassembler)
@@ -150,7 +188,8 @@ namespace
         }
 
         std::set<std::uint64_t> candidatesAtSite;
-        bool                    sawNegativeControlRow = false;
+        bool                    sawDirectBlRow     = false;
+        bool                    sawEmptyFamilyRow  = false;
         for (const auto& row : image->VirtualCalls)
         {
             if (row.Site == kSitePositive)
@@ -164,7 +203,11 @@ namespace
             }
             if (row.Site == kSiteNegativeDirectBl)
             {
-                sawNegativeControlRow = true;
+                sawDirectBlRow = true;
+            }
+            if (row.Site == kSiteNegativeEmptyFamily)
+            {
+                sawEmptyFamilyRow = true;
             }
         }
         // Membership, not an exact count: the signature-suffix match is the documented
@@ -173,7 +216,9 @@ namespace
         // slot), and vcall.py's own self-test asserts membership for the same reason, never a size.
         Expect(candidatesAtSite.contains(kApplySdf), "the family at 0x18b034994 contains SDFNode::apply");
         Expect(candidatesAtSite.contains(kApplyImaging), "the family at 0x18b034994 contains ImagingNode::apply");
-        Expect(!sawNegativeControlRow, "the direct bl at 0x18b2669c4 produces no VirtualCall row");
+        Expect(!sawDirectBlRow, "the direct bl at 0x18b2669c4 produces no VirtualCall row");
+        Expect(!sawEmptyFamilyRow,
+               "the real blraa at 0x18b2ec880, whose discriminator matches no __ZTV family, produces no row");
     }
 
     void GateVirtualCallWriteRoundTrip(const DyldSharedCache::Cache& cache, Facts::Disassembler& disassembler)
@@ -209,6 +254,7 @@ int main()
         GateVirtualCallNotNullRefusesEachColumn();
         GateVirtualCallCheckConstraints();
         GateDiscriminatorSelfCheck();
+        GateRegisterOffsetLdrNeverFabricatesSlot();
     }
     catch (const std::exception& e)
     {

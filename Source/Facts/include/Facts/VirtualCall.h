@@ -7,8 +7,10 @@
 #include <Facts/Disassembler.h>
 #include <MachO/Image.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,10 +43,17 @@ namespace Sherlock::Facts
         std::string   Instruction; // "blraa x8, x16", exactly as capstone printed it
     };
 
+    // The tracker core, decoupled from the cache so a gate can feed it a synthetic instruction
+    // stream directly. `code` is disassembled from `windowStart`; std::nullopt when `site`'s own
+    // instruction is not blraa/braa, or the upstream slot-dereferencing ldr / movk discriminator
+    // is not found inside the window -- refused, never guessed.
+    Expected<std::optional<VirtualCallPattern>> ExtractVirtualCallPatternFromCode(Disassembler& disassembler,
+                                                                                  std::span<const std::byte> code,
+                                                                                  std::uint64_t windowStart,
+                                                                                  std::uint64_t site);
+
     // (slot, D) at the `blraa`/`braa` VA `site`, tracked from a linear disassembly of
-    // `[windowStart, site+4)` -- a port of vcall.py's extract_pattern. std::nullopt when `site`'s
-    // own instruction is not blraa/braa, or the upstream slot-dereferencing ldr / movk
-    // discriminator is not found inside the window -- refused, never guessed.
+    // `[windowStart, site+4)` read out of `cache` -- a port of vcall.py's extract_pattern.
     Expected<std::optional<VirtualCallPattern>> ExtractVirtualCallPattern(const DyldSharedCache::Cache& cache,
                                                                           Disassembler& disassembler,
                                                                           std::uint64_t windowStart,

@@ -221,27 +221,40 @@ namespace Sherlock::Facts
                     while (!dst.empty() && dst.back() == ' ') dst.pop_back();
                     const auto inside      = ins.Operands.substr(open + 1, close - open - 1);
                     const auto insideParts = SplitOnComma(inside);
-                    const std::string base(insideParts.empty() ? std::string_view{} : insideParts[0]);
-                    std::uint64_t     offset = 0;
-                    if (insideParts.size() > 1)
+                    // Only `[base]` or `[base, #imm]` -- vcall.py's _LDR_RE requires the offset
+                    // field to start with '#'; a register-offset form (`[base, xN]` or
+                    // `[base, xN, lsl #k]`) does not match it at all and falls through to the
+                    // generic invalidation below, never a fabricated zero offset.
+                    bool          matches = false;
+                    std::uint64_t offset  = 0;
+                    if (insideParts.size() == 1)
+                    {
+                        matches = true;
+                    }
+                    else if (insideParts.size() == 2 && insideParts[1].starts_with('#'))
                     {
                         if (const auto imm = ParseImmediate(insideParts[1]))
                         {
-                            offset = static_cast<std::uint64_t>(*imm);
+                            offset  = static_cast<std::uint64_t>(*imm);
+                            matches = true;
                         }
                     }
-                    const bool writeback = close + 1 < ins.Operands.size() && ins.Operands[close + 1] == '!';
-                    const auto baseIt    = t.AddrOf.find(base);
-                    const std::uint64_t resolved = (baseIt != t.AddrOf.end() ? baseIt->second : 0) + offset;
-                    t.SlotOf[dst] = resolved;
-                    t.DiscOf.erase(dst);
-                    t.AddrOf.erase(dst);
-                    t.ConstOf.erase(dst);
-                    if (writeback)
+                    if (matches)
                     {
-                        t.AddrOf[base] = resolved;
+                        const std::string base(insideParts[0]);
+                        const bool        writeback = close + 1 < ins.Operands.size() && ins.Operands[close + 1] == '!';
+                        const auto        baseIt    = t.AddrOf.find(base);
+                        const std::uint64_t resolved = (baseIt != t.AddrOf.end() ? baseIt->second : 0) + offset;
+                        t.SlotOf[dst] = resolved;
+                        t.DiscOf.erase(dst);
+                        t.AddrOf.erase(dst);
+                        t.ConstOf.erase(dst);
+                        if (writeback)
+                        {
+                            t.AddrOf[base] = resolved;
+                        }
+                        return;
                     }
-                    return;
                 }
             }
             else if (ins.Mnemonic == "add")
@@ -387,22 +400,16 @@ namespace Sherlock::Facts
         return name.substr(*lastStart);
     }
 
-    Expected<std::optional<VirtualCallPattern>> ExtractVirtualCallPattern(const DyldSharedCache::Cache& cache,
-                                                                          Disassembler& disassembler,
-                                                                          std::uint64_t windowStart,
-                                                                          std::uint64_t site)
+    Expected<std::optional<VirtualCallPattern>> ExtractVirtualCallPatternFromCode(Disassembler& disassembler,
+                                                                                  std::span<const std::byte> code,
+                                                                                  std::uint64_t windowStart,
+                                                                                  std::uint64_t site)
     {
-        const auto bytes = cache.Read(windowStart, site + 4 - windowStart);
-        if (!bytes)
-        {
-            return std::unexpected(bytes.error());
-        }
-
         TrackerState                      tracker;
         std::optional<VirtualCallPattern> result;
         bool                               settled = false;
 
-        const auto coverage = disassembler.Stream(*bytes, windowStart, [&](const Instruction& ins) {
+        const auto coverage = disassembler.Stream(code, windowStart, [&](const Instruction& ins) {
             if (settled)
             {
                 return;
@@ -438,6 +445,19 @@ namespace Sherlock::Facts
             return std::unexpected(coverage.error());
         }
         return result;
+    }
+
+    Expected<std::optional<VirtualCallPattern>> ExtractVirtualCallPattern(const DyldSharedCache::Cache& cache,
+                                                                          Disassembler& disassembler,
+                                                                          std::uint64_t windowStart,
+                                                                          std::uint64_t site)
+    {
+        const auto bytes = cache.Read(windowStart, site + 4 - windowStart);
+        if (!bytes)
+        {
+            return std::unexpected(bytes.error());
+        }
+        return ExtractVirtualCallPatternFromCode(disassembler, *bytes, windowStart, site);
     }
 
     Expected<std::vector<VirtualCallCandidate>> ResolveVirtualCallFamily(const DyldSharedCache::Cache& cache,
