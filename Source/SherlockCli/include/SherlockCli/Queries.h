@@ -30,8 +30,10 @@ namespace Sherlock::Cli
 
     Foundation::Expected<void> PrintHeader(const QueryEnvironment& env, std::string_view build);
 
-    // q's layer 3: the doc sections citing a resolved address and the seals sealed at it, or the
-    // one line "layer 3: not built" when Documents.db is absent or schema-mismatched (decision 4).
+    // q's layer 3: the doc sections citing a resolved address and the seals sealed at it, or one line
+    // saying why there are none: "not built" when Documents.db is absent or schema-mismatched,
+    // "NOT VERIFIED" when the consumer's sherlock.json or Documents.db cannot be read, "stale" when
+    // Documents.db was built from another sherlock.json (decision 4).
     // Needs only an address, never a DyldSharedCache::Cache, so a gate can cover it without one.
     void PrintDocumentLayer(const QueryEnvironment& env, std::uint64_t address);
 

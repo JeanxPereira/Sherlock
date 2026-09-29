@@ -6,6 +6,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(SHERLOCK_CACHE  "" CACHE PATH "Extracted dyld shared cache (<build>__MacOS) the corpus gates read")
 set(SHERLOCK_STORE  "" CACHE PATH "Store directory (Catalog.db, Images/) the corpus gates read and fill")
 set(SHERLOCK_DYLIBS "" CACHE PATH "Extracted dylibs directory the layer-2 export gates decompile")
+set(SHERLOCK_CONFIG "" CACHE FILEPATH "A consumer's sherlock.json whose towers name the corpus images (Sherlock.BuildTowers reads it)")
 
 set(S ${PROJECT_SOURCE_DIR}/Source)
 set(SHERLOCK_FIXTURES ${CMAKE_CURRENT_LIST_DIR}/fixtures)
@@ -80,6 +81,12 @@ add_test(NAME Sherlock.FinalFixGates
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/FinalFixGates.py
                 $<TARGET_FILE:Sherlock> ${CMAKE_CURRENT_BINARY_DIR}/FinalFixGateScratch)
 
+# The fixture consumer through the real executable: discovery, --config, nesting, every kind,
+# every refusal and the configuration-bound staleness.
+add_test(NAME Sherlock.ConsumerGate
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/ConsumerGate.py
+                $<TARGET_FILE:Sherlock> ${SHERLOCK_FIXTURES}/consumer ${CMAKE_CURRENT_BINARY_DIR}/ConsumerScratch)
+
 # The parent of `build hexrays` driven with a stand-in worker: the resume reset, a failed image
 # and the free-space floor are gated on every machine, with or without IDA.
 add_test(NAME Sherlock.HexRaysBuildGate
@@ -115,6 +122,15 @@ if(SHERLOCK_CORPUS)
     sherlock_gate(FactsGates LINKS Sherlock::Facts)
     sherlock_gate(VirtualCallGates LINKS Sherlock::Facts Sherlock::Store)
 
+    # The store is filled once; every query test below requires it and none rebuilds it. The tower
+    # map lives in a consumer's sherlock.json, so the fill needs one.
+    if(SHERLOCK_CONFIG)
+        add_test(NAME Sherlock.BuildTowers
+                COMMAND $<TARGET_FILE:Sherlock> build facts --towers --resume --config ${SHERLOCK_CONFIG}
+                        --cache ${SHERLOCK_CACHE} --store ${SHERLOCK_STORE})
+        set_tests_properties(Sherlock.BuildTowers PROPERTIES FIXTURES_SETUP SherlockStore TIMEOUT 3600)
+    endif()
+
     function(sherlock_query_test name)
         cmake_parse_arguments(ARG "" "MATCH" "" ${ARGN})
         add_test(NAME Sherlock.${name} COMMAND $<TARGET_FILE:Sherlock> ${ARG_UNPARSED_ARGUMENTS}
@@ -147,20 +163,11 @@ if(SHERLOCK_CORPUS)
             FIXTURES_REQUIRED SherlockStore
             PASS_REGULAR_EXPRESSION "0x240679e58")
 
-    # A consumer with one evidence page, so the configuration loads; --documents names a path that
-    # never exists, so the answer cannot depend on run order.
-    set(SHERLOCK_NO_DOCUMENTS_ROOT ${CMAKE_CURRENT_BINARY_DIR}/SherlockNoDocumentsConsumer)
-    file(MAKE_DIRECTORY ${SHERLOCK_NO_DOCUMENTS_ROOT}/docs/re)
-    file(WRITE ${SHERLOCK_NO_DOCUMENTS_ROOT}/docs/re/page.md "## 1 A page
-
-Text.
-")
-    file(WRITE ${SHERLOCK_NO_DOCUMENTS_ROOT}/sherlock.json
-        "{ \"schema\": 1, \"sherlock\": \"0.2\", \"collections\": [ { \"path\": \"docs/re\", \"kind\": \"evidence\" } ] }
-")
+    # The fixture consumer supplies the configuration; --documents names a path that never exists,
+    # so the answer cannot depend on run order.
     add_test(NAME Sherlock.QueryNoDocuments
             COMMAND $<TARGET_FILE:Sherlock> q 0x240622d98 --cache ${SHERLOCK_CACHE} --store ${SHERLOCK_STORE}
-                    --config ${SHERLOCK_NO_DOCUMENTS_ROOT}/sherlock.json
+                    --config ${SHERLOCK_FIXTURES}/consumer/sherlock.json
                     --documents ${CMAKE_CURRENT_BINARY_DIR}/SherlockDocumentsCorpus/DoesNotExist.db)
     set_tests_properties(Sherlock.QueryNoDocuments PROPERTIES
             FIXTURES_REQUIRED SherlockStore

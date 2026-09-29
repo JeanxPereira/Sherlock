@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "sherlock": "0.2",
+  "towers": "towers.json",
+  "collections": [
+    { "path": "docs/re", "kind": "evidence" },
+    { "path": "docs/concepts", "kind": "concept" },
+    { "path": "Source", "kind": "code", "extensions": [".h"] }
+  ],
+  "seals": { "tags": ["BIN", "KIT"], "imageTag": "BIN" }
+}

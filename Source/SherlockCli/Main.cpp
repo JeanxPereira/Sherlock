@@ -226,7 +226,13 @@ int main(int argc, char** argv)
     if (readsConsumer)
     {
         std::error_code cwdError;
-        const auto file = Configuration::Discover(invocation->Config, std::filesystem::current_path(cwdError));
+        const auto start = std::filesystem::current_path(cwdError);
+        const auto file  = cwdError && invocation->Config.empty()
+            ? Foundation::Expected<std::filesystem::path>(Foundation::Fail(
+                  Foundation::DiagnosticCode::Io, Foundation::Severity::NotVerified, "main", "",
+                  "the current directory cannot be read: " + cwdError.message(),
+                  "run Sherlock from an existing directory, or pass --config <sherlock.json>"))
+            : Configuration::Discover(invocation->Config, start);
         if (file)
             consumer = Configuration::Load(*file, SHERLOCK_VERSION);
         else
