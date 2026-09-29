@@ -133,6 +133,7 @@ def main():
     refused(exe, lonely, "no sherlock.json is refused, naming the walk and --config", ["no sherlock.json", "--config"])
 
     # 5. The store binds its configuration: changed bytes read stale until the next build.
+    # The stale mark below relies on the keyed-hash assertion in check 1 to tell a mismatch from a missing key.
     with open(root / "sherlock.json", "ab") as fh:
         fh.write(b"\n")
     code, out = run(exe, ["laudo", "sample-laudo", "§1"], root)

@@ -87,6 +87,11 @@ add_test(NAME Sherlock.ConsumerGate
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/ConsumerGate.py
                 $<TARGET_FILE:Sherlock> ${SHERLOCK_FIXTURES}/consumer ${CMAKE_CURRENT_BINARY_DIR}/ConsumerScratch)
 
+# cmake --install lays out <prefix>/bin/Sherlock.exe, and it answers this build's version.
+add_test(NAME Sherlock.InstallGate
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/InstallGate.py
+                ${CMAKE_COMMAND} ${PROJECT_BINARY_DIR} $<CONFIG> ${CMAKE_CURRENT_BINARY_DIR}/InstallScratch ${PROJECT_VERSION})
+
 # The parent of `build hexrays` driven with a stand-in worker: the resume reset, a failed image
 # and the free-space floor are gated on every machine, with or without IDA.
 add_test(NAME Sherlock.HexRaysBuildGate

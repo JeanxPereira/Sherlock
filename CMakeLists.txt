@@ -104,6 +104,12 @@ add_executable(Sherlock
 target_include_directories(Sherlock PRIVATE ${S}/SherlockCli/include)
 target_link_libraries(Sherlock PRIVATE Sherlock::Facts Sherlock::DocumentIndex Sherlock::Configuration Sherlock::HexRaysExport nlohmann_json::nlohmann_json Psapi)
 sherlock_compile_options(Sherlock)
+# A consumer finds Sherlock at <prefix>/bin; the layer-2 worker sits beside it because `build hexrays`
+# looks for SherlockHexRays.exe next to its own executable.
+install(TARGETS Sherlock RUNTIME DESTINATION bin)
+if(SHERLOCK_IDA_FOUND)
+    install(TARGETS SherlockHexRays RUNTIME DESTINATION bin)
+endif()
 
 option(SHERLOCK_BUILD_TESTS "Builds Sherlock's gates" ${PROJECT_IS_TOP_LEVEL})
 if(SHERLOCK_BUILD_TESTS)

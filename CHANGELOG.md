@@ -2,8 +2,10 @@
 
 Each version states what it adds and the measurement behind every performance claim.
 
-## Unreleased
+## 0.2.0
 
+- **Breaking: `--repo` and `SHERLOCK_REPO` are removed, and `sherlock.json` is required** for `build facts`, `build docs`, `find` and `laudo`. The `towers` path in `sherlock.json` is relative to the directory holding the file, and an absolute path or one leaving that directory is refused.
+- **Sherlock is its own repository**, extracted with its history from AquaKit's `tools/Sherlock` and `tests/Sherlock`. It builds, tests and installs on its own: `CMakePresets.json` (`debug`, `release`), and `cmake --install` yields `bin\Sherlock.exe`, plus `bin\SherlockHexRays.exe` when layer 2 was built (`Sherlock.InstallGate`). AquaKit keeps the gates that compare Sherlock against its own instruments and documents; the fixture consumer under `tests/fixtures/consumer/` proves discovery, validation and every kind here.
 - **The consumer declares its layout in `sherlock.json`** (schema 1): the tower map, the document collections by kind (`evidence` split by heading, `concept` one front-mattered page per section, `code` seals from `//` comments), the seal tags and the one that carries an image, and the Sherlock version it requires. Discovery is `--config <file>`, else the first `sherlock.json` walking up from the current directory. Every refusal is NOT VERIFIED and names what it refused: no file, an unknown key, an invalid kind, another schema, a declared path that does not exist, a collection holding no file Sherlock reads, a requirement this executable does not meet.
 - `--repo` and `SHERLOCK_REPO` are gone: the root is the configuration's directory, and `Documents.db` defaults to `<root>/build/Sherlock/Documents.db`. The layer-3 "not built" line names `Sherlock build docs --config <file> --documents <db>`.
 - `build facts`, `build docs`, `find` and `laudo` refuse without a configuration. `q` and `status` answer layers 1 and 2 and print `layer 3: NOT VERIFIED -- <why>`, because a missing configuration is not an empty document layer.
