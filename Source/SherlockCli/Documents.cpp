@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/Documents.cpp
+// Sherlock — Source/SherlockCli/Documents.cpp
 // find and laudo query Documents.db and verify a returned document's one backing file.
 #include <SherlockCli/Documents.h>
 

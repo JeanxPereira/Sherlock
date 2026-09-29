@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Foundation/MappedFile.cpp
+// Sherlock — Source/Foundation/MappedFile.cpp
 // Win32 file mapping behind MappedFile.
 #include <Foundation/MappedFile.h>
 

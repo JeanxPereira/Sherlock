@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/MachO/Image.cpp
+// Sherlock — Source/MachO/Image.cpp
 // Load-command walk of one Mach-O 64 image: segments, sections, LC_SYMTAB, LC_FUNCTION_STARTS.
 #include <MachO/Image.h>
 

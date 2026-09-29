@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/ConceptFrontMatter.cpp
+// Sherlock — Source/DocumentIndex/ConceptFrontMatter.cpp
 // A hand-rolled parser for the three-key shape -- no YAML dependency for one bracket list.
 #include <DocumentIndex/ConceptFrontMatter.h>
 

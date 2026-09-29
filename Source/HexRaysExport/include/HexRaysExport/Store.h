@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/HexRaysExport/include/HexRaysExport/Store.h
+// Sherlock — Source/HexRaysExport/include/HexRaysExport/Store.h
 // Layer 2's own database: one decompilation row per function, and the coverage a zero reports (derived).
 #pragma once
 

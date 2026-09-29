@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/FileStamp.cpp
+// Sherlock — Source/DocumentIndex/FileStamp.cpp
 #include <DocumentIndex/FileStamp.h>
 
 #include <system_error>

@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/LiteralReaders.cpp
+// Sherlock — Source/Facts/LiteralReaders.cpp
 // Reads capstone's mnemonic/op_str exactly as litref.readers does, so the parity gate compares one rule to one rule.
 #include <Facts/LiteralReaders.h>
 

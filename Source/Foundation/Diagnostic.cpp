@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Foundation/Diagnostic.cpp
+// Sherlock — Source/Foundation/Diagnostic.cpp
 // Formatting of a Diagnostic and the Win32 error text it carries.
 #include <Foundation/Diagnostic.h>
 

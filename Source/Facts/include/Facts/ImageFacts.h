@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/include/Facts/ImageFacts.h
+// Sherlock — Source/Facts/include/Facts/ImageFacts.h
 // One image's layer-1 facts: functions, symbols, calls, literal reads, coverage (derived).
 #pragma once
 

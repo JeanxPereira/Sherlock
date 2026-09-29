@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/MachOGates.cpp
+// Sherlock — tests/MachOGates.cpp
 // Segments, sections, function starts and symbols of DesignLibrary and SwiftUICore; cache owner and image lookup.
 #include <DyldSharedCache/Cache.h>
 #include <MachO/Image.h>

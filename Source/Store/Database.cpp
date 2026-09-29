@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Store/Database.cpp
+// Sherlock — Source/Store/Database.cpp
 // SQLite calls behind Database, Statement and Transaction.
 #include <Store/Database.h>
 

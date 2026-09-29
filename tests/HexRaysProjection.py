@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sherlock -- tests/Sherlock/HexRaysProjection.py
+# Sherlock -- tests/HexRaysProjection.py
 # The phase-3 gate: what layer 2 costs per byte of binary and per function, and what those two
 # rates project over the whole cache. Phase 4 starts only after a person reads this.
 #

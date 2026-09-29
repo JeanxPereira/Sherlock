@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/include/DocumentIndex/SealExtractor.h
+// Sherlock — Source/DocumentIndex/include/DocumentIndex/SealExtractor.h
 // A //-only port of References/scripts/lint_seals.py's blocks()/BIN/ADDR for Source/ (derived).
 #pragma once
 

@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/include/Facts/BranchIsland.h
+// Sherlock — Source/Facts/include/Facts/BranchIsland.h
 // island -> target, a hop-limited port of xisland.py's island_target (derived).
 #pragma once
 

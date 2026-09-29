@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/include/SherlockCli/Towers.h
+// Sherlock — Source/SherlockCli/include/SherlockCli/Towers.h
 // towers.json's build id and image map, turned into build-order input (derived).
 #pragma once
 

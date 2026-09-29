@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/include/DocumentIndex/GitHead.h
+// Sherlock — Source/DocumentIndex/include/DocumentIndex/GitHead.h
 // The current HEAD SHA, read from .git without spawning git (derived).
 #pragma once
 

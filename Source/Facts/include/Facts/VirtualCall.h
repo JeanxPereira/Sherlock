@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/include/Facts/VirtualCall.h
+// Sherlock — Source/Facts/include/Facts/VirtualCall.h
 // arm64e C++ virtual dispatch: slot+discriminator at a blraa/braa site, and the __ZTV family it
 // reaches -- a port of References/scripts/vcall.py's extract_pattern/candidates_for (derived).
 #pragma once

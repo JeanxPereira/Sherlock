@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/MachO/include/MachO/Image.h
+// Sherlock — Source/MachO/include/MachO/Image.h
 // Segments, sections, function starts and the symbol table of one Mach-O 64 image (Apple name).
 #pragma once
 

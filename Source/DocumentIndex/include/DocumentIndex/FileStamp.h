@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/include/DocumentIndex/FileStamp.h
+// Sherlock — Source/DocumentIndex/include/DocumentIndex/FileStamp.h
 // A cheap per-file stat (Size/MTime, no content read), used by document staleness checks (derived).
 #pragma once
 

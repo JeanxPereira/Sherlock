@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/FactsGates.cpp
+// Sherlock — tests/FactsGates.cpp
 // Island resolution, out-of-text calls, literal reads and coverage against the measured controls.
 #include <DyldSharedCache/Cache.h>
 #include <Facts/BranchIsland.h>

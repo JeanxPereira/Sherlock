@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sherlock -- tests/Sherlock/HexRaysBuildGate.py
+# Sherlock -- tests/HexRaysBuildGate.py
 # The three behaviours that belong to the parent of `build hexrays`, none of which need IDA:
 #
 #   1. An image left HexRaysRunning is a crash, not progress. --resume puts it back to Pending

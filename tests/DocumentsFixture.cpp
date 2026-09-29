@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/DocumentsFixture.cpp
+// Sherlock — tests/DocumentsFixture.cpp
 // A deterministic Documents.db fixture, written through the Store schema APIs.
 #include <Store/Database.h>
 #include <Store/Schema.h>

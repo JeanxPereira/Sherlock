@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/HexRaysExport/Worker.cpp
+// Sherlock — Source/HexRaysExport/Worker.cpp
 // The one translation unit that includes the IDA SDK: an image opened, every function
 // decompiled, one store written (derived).
 

@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/Builder.cpp
+// Sherlock — Source/Facts/Builder.cpp
 // Catalog and per-image stores, filled by worker threads that each own a Disassembler and a Database.
 #include <Facts/Builder.h>
 

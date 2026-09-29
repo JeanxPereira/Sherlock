@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/CliGates.cpp
+// Sherlock — tests/CliGates.cpp
 // Argument parsing, towers.json reading, and the demangler against the measured Swift name.
 #include <SherlockCli/Arguments.h>
 #include <SherlockCli/Demangler.h>

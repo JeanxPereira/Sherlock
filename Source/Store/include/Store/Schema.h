@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Store/include/Store/Schema.h
+// Sherlock — Source/Store/include/Store/Schema.h
 // The catalog and image-store schemas, and the version a store must carry to be read (derived).
 #pragma once
 

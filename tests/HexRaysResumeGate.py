@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sherlock -- tests/Sherlock/HexRaysResumeGate.py
+# Sherlock -- tests/HexRaysResumeGate.py
 # An export of a large image runs for hours and is interrupted by things that have nothing to do
 # with it: a machine short of memory, a session that ends, a reboot. What that interruption costs
 # is a property of the worker, not of the accident, and it is the property this gate measures.

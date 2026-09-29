@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DyldSharedCache/include/DyldSharedCache/Format.h
+// Sherlock — Source/DyldSharedCache/include/DyldSharedCache/Format.h
 // Apple's on-disk structures of the dyld shared cache, from dyld's include/mach-o/dyld_cache_format.h.
 #pragma once
 

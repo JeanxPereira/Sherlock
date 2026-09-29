@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/Verdict.cpp
+// Sherlock — Source/SherlockCli/Verdict.cpp
 // verdict: FOUND/EMPTY/PARTIAL/NOT VERIFIED, and the EMPTY -> PARTIAL coverage-incomplete downgrade.
 #include <SherlockCli/Verdict.h>
 

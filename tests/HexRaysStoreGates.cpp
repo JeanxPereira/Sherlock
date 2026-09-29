@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/HexRaysStoreGates.cpp
+// Sherlock — tests/HexRaysStoreGates.cpp
 // Layer 2's own schema version, the compressed round trip, and the coverage a zero reports.
 #include <HexRaysExport/Store.h>
 #include <Store/Database.h>

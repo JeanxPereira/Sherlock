@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DyldSharedCache/Cache.cpp
+// Sherlock — Source/DyldSharedCache/Cache.cpp
 // Opening, addressing and pointer decoding of the split dyld shared cache.
 #include <DyldSharedCache/Cache.h>
 #include <DyldSharedCache/Format.h>

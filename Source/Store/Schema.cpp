@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Store/Schema.cpp
+// Sherlock — Source/Store/Schema.cpp
 // DDL of Catalog.db and Images/<Name>.db, and the check that refuses another version.
 #include <Store/Schema.h>
 

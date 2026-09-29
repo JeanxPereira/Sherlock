@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/include/DocumentIndex/Builder.h
+// Sherlock — Source/DocumentIndex/include/DocumentIndex/Builder.h
 // Walks docs/re, docs/concepts and Source/, writing Documents.db whole, in one transaction (derived).
 #pragma once
 

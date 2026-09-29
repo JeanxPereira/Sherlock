@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/include/DocumentIndex/Heading.h
+// Sherlock — Source/DocumentIndex/include/DocumentIndex/Heading.h
 // One markdown heading: its line, level, optional section number and title, fence-aware (derived).
 #pragma once
 

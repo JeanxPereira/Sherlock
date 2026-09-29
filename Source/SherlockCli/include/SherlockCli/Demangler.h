@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/include/SherlockCli/Demangler.h
+// Sherlock — Source/SherlockCli/include/SherlockCli/Demangler.h
 // libSwiftDemangle.dll loaded at run time, RAII over the module handle (derived).
 #pragma once
 

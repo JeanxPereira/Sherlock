@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/LaudoSections.cpp
+// Sherlock — Source/DocumentIndex/LaudoSections.cpp
 // Ties Heading and ConceptFrontMatter together into one file's DocSection rows.
 #include <DocumentIndex/LaudoSections.h>
 

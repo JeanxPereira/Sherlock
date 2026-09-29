@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/Main.cpp
+// Sherlock — Source/SherlockCli/Main.cpp
 // Entry point: --version, `build facts`, and the facts and documents query commands.
 #include <DyldSharedCache/Cache.h>
 #include <DocumentIndex/Builder.h>

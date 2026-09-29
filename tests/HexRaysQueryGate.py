@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sherlock -- tests/Sherlock/HexRaysQueryGate.py
+# Sherlock -- tests/HexRaysQueryGate.py
 # `fn` over the real stores: the enclosing function, layer 2's pseudocode, layer 1's disassembly,
 # and what an address layer 2 does not cover reports.
 #

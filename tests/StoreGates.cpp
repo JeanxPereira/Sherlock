@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/StoreGates.cpp
+// Sherlock — tests/StoreGates.cpp
 // Transaction rollback, statement reuse, schema refusal, and handle lifetime.
 #include <Store/Database.h>
 #include <Store/Schema.h>

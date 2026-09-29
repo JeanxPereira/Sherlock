@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Foundation/include/Foundation/ByteReader.h
+// Sherlock — Source/Foundation/include/Foundation/ByteReader.h
 // Bounds-checked little-endian reads from a byte span (derived).
 #pragma once
 

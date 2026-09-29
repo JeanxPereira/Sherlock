@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/include/DocumentIndex/CitationExtractor.h
+// Sherlock — Source/DocumentIndex/include/DocumentIndex/CitationExtractor.h
 // Address and symbol citations found in one section's text (derived).
 #pragma once
 

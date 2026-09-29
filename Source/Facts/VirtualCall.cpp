@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/VirtualCall.cpp
+// Sherlock — Source/Facts/VirtualCall.cpp
 // SipHash-2-4 discriminator, Itanium signature suffix, and the blraa/braa register tracker, read
 // the way References/scripts/vcall.py reads capstone's mnemonic/op_str (derived).
 #include <Facts/VirtualCall.h>

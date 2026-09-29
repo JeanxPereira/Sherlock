@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/include/Facts/Disassembler.h
+// Sherlock — Source/Facts/include/Facts/Disassembler.h
 // One capstone handle, resuming past a word it cannot decode (port of litref.py decode / xisland.py stream).
 #pragma once
 

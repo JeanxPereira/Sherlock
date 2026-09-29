@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/VirtualCallGates.cpp
+// Sherlock — tests/VirtualCallGates.cpp
 // The VirtualCall table's own NOT NULL/CHECK refusals, and the arm64e PAC vtable dispatch
 // resolver against QuartzCore's real ImagingNode::render dispatch (derived).
 #include <DyldSharedCache/Cache.h>

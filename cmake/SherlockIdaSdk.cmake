@@ -1,4 +1,4 @@
-# Sherlock — tools/Sherlock/cmake/SherlockIdaSdk.cmake
+# Sherlock — cmake/SherlockIdaSdk.cmake
 # Selects an IDA SDK whose decompiler API magic matches an installed IDA's, and says why when none does.
 
 set(SHERLOCK_IDA_SDK "" CACHE PATH "IDA C++ SDK root (the directory holding include/ and lib/)")

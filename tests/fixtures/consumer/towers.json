@@ -1,0 +1,10 @@
+{
+  "build": "TEST1",
+  "image": {
+    "Platform": "",
+    "Sample": "/System/Library/PrivateFrameworks/Sample.framework/Versions/A/Sample"
+  },
+  "indexed_non_tower_image": {
+    "Reader": "/System/Library/PrivateFrameworks/Reader.framework/Versions/A/Reader"
+  }
+}

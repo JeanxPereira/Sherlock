@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/SherlockHarness.h
+// Sherlock — tests/SherlockHarness.h
 // Expectations, the exit code, and the corpus paths ctest hands over (derived).
 #pragma once
 

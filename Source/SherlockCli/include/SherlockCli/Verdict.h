@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/include/SherlockCli/Verdict.h
+// Sherlock — Source/SherlockCli/include/SherlockCli/Verdict.h
 // The verdict line and its exit code, byte-exact with References/scripts/verdict.py (derived).
 #pragma once
 

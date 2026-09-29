@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/DocumentLayerGates.cpp
+// Sherlock — tests/DocumentLayerGates.cpp
 // Corpus-free gates for q's layer-3 blocks (PrintDocumentLayer) and status's layer-3 line: both
 // must degrade to a stated zero, never a crash, when Documents.db is absent or schema-mismatched
 // (decision 4), and status's staleness counts must reflect what Tasks 6-7 actually wrote (a

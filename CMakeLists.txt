@@ -1,5 +1,5 @@
-# Sherlock — tools/Sherlock/CMakeLists.txt
-# The Sherlock project: its version, its modules and their edges, its tests.
+# Sherlock — CMakeLists.txt
+# The Sherlock project: its version, its modules and their edges, its gates, its installation.
 cmake_minimum_required(VERSION 3.28)
 project(Sherlock VERSION 0.1.0 LANGUAGES C CXX)
 
@@ -99,8 +99,8 @@ target_include_directories(Sherlock PRIVATE ${S}/SherlockCli/include)
 target_link_libraries(Sherlock PRIVATE Sherlock::Facts Sherlock::DocumentIndex Sherlock::HexRaysExport nlohmann_json::nlohmann_json Psapi)
 sherlock_compile_options(Sherlock)
 
-option(SHERLOCK_BUILD_TESTS "Builds Sherlock's gates" ON)
+option(SHERLOCK_BUILD_TESTS "Builds Sherlock's gates" ${PROJECT_IS_TOP_LEVEL})
 if(SHERLOCK_BUILD_TESTS)
     enable_testing()
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../tests/Sherlock ${CMAKE_CURRENT_BINARY_DIR}/tests)
+    add_subdirectory(tests)
 endif()

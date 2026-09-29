@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Foundation/include/Foundation/Diagnostic.h
+// Sherlock — Source/Foundation/include/Foundation/Diagnostic.h
 // A failure as a value: what failed, on what, why, and the one action that fixes it (derived).
 #pragma once
 

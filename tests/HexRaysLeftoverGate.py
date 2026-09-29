@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sherlock -- tests/Sherlock/HexRaysLeftoverGate.py
+# Sherlock -- tests/HexRaysLeftoverGate.py
 # An unpacked IDA database beside an image has two causes that need opposite answers, and the
 # files alone cannot tell them apart:
 #

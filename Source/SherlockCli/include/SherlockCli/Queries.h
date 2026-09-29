@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/include/SherlockCli/Queries.h
+// Sherlock — Source/SherlockCli/include/SherlockCli/Queries.h
 // q, callers, calls, refs, status -- each opens the image stores it needs and returns one Verdict (derived).
 #pragma once
 

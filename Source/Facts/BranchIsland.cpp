@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/BranchIsland.cpp
+// Sherlock — Source/Facts/BranchIsland.cpp
 // adrp/add/ldr slot decoding and plain-b chaining, read the way xisland.py's island_target reads capstone's text.
 #include <Facts/BranchIsland.h>
 

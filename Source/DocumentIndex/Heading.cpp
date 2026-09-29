@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/Heading.cpp
+// Sherlock — Source/DocumentIndex/Heading.cpp
 // Splits markdown into lines, walks fences, classifies each heading line into Number/Title.
 #include <DocumentIndex/Heading.h>
 

@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/DocumentsGates.cpp
+// Sherlock — tests/DocumentsGates.cpp
 // Direct Documents.db fixture gates for find and laudo.
 #include <DocumentIndex/Builder.h>
 #include <SherlockCli/Documents.h>

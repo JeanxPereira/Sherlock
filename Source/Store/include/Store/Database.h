@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Store/include/Store/Database.h
+// Sherlock — Source/Store/include/Store/Database.h
 // Owning wrappers for an SQLite connection, a prepared statement and a transaction (derived).
 #pragma once
 

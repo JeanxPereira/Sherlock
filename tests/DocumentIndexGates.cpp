@@ -1,5 +1,5 @@
-// Sherlock — tests/Sherlock/DocumentIndexGates.cpp
-// Unit gates for DocumentIndex's pure parsers, over the fixtures in tests/Sherlock/fixtures/.
+// Sherlock — tests/DocumentIndexGates.cpp
+// Unit gates for DocumentIndex's pure parsers, over the fixtures in tests/fixtures/.
 #include "SherlockHarness.h"
 
 #include <DocumentIndex/CitationExtractor.h>
@@ -463,7 +463,7 @@ namespace
     void TestSealExtraction()
     {
         auto seals = DocumentIndex::ExtractSeals(FixturePath("seal-sample.txt"),
-                                                 "tests/Sherlock/fixtures/seal-sample.txt");
+                                                 "tests/fixtures/seal-sample.txt");
         Expect(seals.has_value(), "ExtractSeals reads the fixture");
         const auto& rows = *seals;
         ExpectEq(rows.size(), std::size_t(9),

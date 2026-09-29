@@ -1,4 +1,4 @@
-# Sherlock — tools/Sherlock/cmake/SherlockDependencies.cmake
+# Sherlock — cmake/SherlockDependencies.cmake
 # The four third-party libraries, pinned by tag or by hash.
 include(FetchContent)
 

@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/HexRays.cpp
+// Sherlock — Source/SherlockCli/HexRays.cpp
 // `build hexrays`: image order, the free-space floor, one worker process per image, and the
 // catalog states only this process writes (derived).
 

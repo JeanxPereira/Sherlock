@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/include/Facts/LiteralReaders.h
+// Sherlock — Source/Facts/include/Facts/LiteralReaders.h
 // The adrp + add/ldr literal-address tracker, a port of litref.py's readers() (derived).
 #pragma once
 

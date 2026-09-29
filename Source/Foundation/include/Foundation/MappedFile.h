@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Foundation/include/Foundation/MappedFile.h
+// Sherlock — Source/Foundation/include/Foundation/MappedFile.h
 // A whole file mapped read-only; the handles close with the object (derived).
 #pragma once
 

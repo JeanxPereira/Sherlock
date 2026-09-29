@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/GitHead.cpp
+// Sherlock — Source/DocumentIndex/GitHead.cpp
 // Resolves normal and linked-worktree HEAD files without starting git.
 #include <DocumentIndex/GitHead.h>
 

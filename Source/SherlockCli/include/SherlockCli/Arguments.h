@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/include/SherlockCli/Arguments.h
+// Sherlock — Source/SherlockCli/include/SherlockCli/Arguments.h
 // argv parsed into one Invocation, shared by every subcommand (derived).
 #pragma once
 

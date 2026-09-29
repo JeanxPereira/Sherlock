@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sherlock -- tests/Sherlock/HexRaysSdkGate.py
+# Sherlock -- tests/HexRaysSdkGate.py
 # The worker's version line, and the loop between the SDK cmake chose and the one it compiled against.
 #
 # An SDK whose decompiler API differs from the installed decompiler's links, initialises and opens a

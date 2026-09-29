@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/Queries.cpp
+// Sherlock — Source/SherlockCli/Queries.cpp
 // Per-image-store SQL behind every subcommand, routed through DyldSharedCache::Cache::Owner.
 #include <SherlockCli/Queries.h>
 

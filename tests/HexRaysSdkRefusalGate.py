@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sherlock -- tests/Sherlock/HexRaysSdkRefusalGate.py
+# Sherlock -- tests/HexRaysSdkRefusalGate.py
 # The pairing check refuses an SDK the installed decompiler cannot answer, and accepts one it can.
 #
 # Both directions are the gate. A refusal that fires on everything protects nothing, and the check

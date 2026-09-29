@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Foundation/include/Foundation/AddressSpace.h
+// Sherlock — Source/Foundation/include/Foundation/AddressSpace.h
 // Read-by-virtual-address, the one thing a Mach-O parser needs from its host (derived).
 #pragma once
 

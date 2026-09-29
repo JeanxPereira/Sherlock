@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sherlock -- tests/Sherlock/HexRaysWorkerGate.py
+# Sherlock -- tests/HexRaysWorkerGate.py
 # The worker's output over one real image: the repository's own control address is covered, every
 # row carries a status, and no row claims success with nothing in it.
 #

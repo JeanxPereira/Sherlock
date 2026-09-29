@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/DyldSharedCacheGates.cpp
+// Sherlock — tests/DyldSharedCacheGates.cpp
 // The 26A5416b cache opens as one address space with the values measured for it.
 #include <DyldSharedCache/Cache.h>
 

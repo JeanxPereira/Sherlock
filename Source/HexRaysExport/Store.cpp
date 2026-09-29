@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/HexRaysExport/Store.cpp
+// Sherlock — Source/HexRaysExport/Store.cpp
 // Creating, writing and reading Images/<Image>.HexRays.db, pseudocode compressed on the way in (derived).
 
 #include <HexRaysExport/Store.h>

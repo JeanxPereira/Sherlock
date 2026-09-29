@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/CitationExtractor.cpp
+// Sherlock — Source/DocumentIndex/CitationExtractor.cpp
 // Two independent regex passes over the section's text: bare/backticked addresses, backticked symbols.
 #include <DocumentIndex/CitationExtractor.h>
 

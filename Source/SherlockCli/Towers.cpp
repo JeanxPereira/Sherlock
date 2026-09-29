@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/Towers.cpp
+// Sherlock — Source/SherlockCli/Towers.cpp
 // nlohmann::json read of towers.json's "build", "image" and
 // "indexed_non_tower_image" keys.
 #include <SherlockCli/Towers.h>

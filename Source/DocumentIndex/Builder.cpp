@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/Builder.cpp
+// Sherlock — Source/DocumentIndex/Builder.cpp
 // Orchestrates the document extractors into one Documents.db transaction.
 #include <DocumentIndex/Builder.h>
 

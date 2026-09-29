@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/SealExtractor.cpp
+// Sherlock — Source/DocumentIndex/SealExtractor.cpp
 // blocks()/TAG/BIN/ADDR, ported from lint_seals.py for Source/'s "//"-only comment style.
 #include <DocumentIndex/SealExtractor.h>
 

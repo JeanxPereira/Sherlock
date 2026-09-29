@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/include/SherlockCli/HexRays.h
+// Sherlock — Source/SherlockCli/include/SherlockCli/HexRays.h
 // `build hexrays`: the parent that spawns one worker per image and owns the catalog (derived).
 #pragma once
 

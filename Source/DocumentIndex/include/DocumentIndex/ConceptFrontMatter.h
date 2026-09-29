@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/include/DocumentIndex/ConceptFrontMatter.h
+// Sherlock — Source/DocumentIndex/include/DocumentIndex/ConceptFrontMatter.h
 // The three-key front matter every docs/concepts/*.md page opens with, and the GENERATED marker (derived).
 #pragma once
 

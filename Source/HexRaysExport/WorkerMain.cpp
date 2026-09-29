@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/HexRaysExport/WorkerMain.cpp
+// Sherlock — Source/HexRaysExport/WorkerMain.cpp
 // The layer-2 worker process: one image per run, and the only binary that links IDA (derived).
 
 #include <HexRaysExport/Worker.h>

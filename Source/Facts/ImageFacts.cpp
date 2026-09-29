@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/ImageFacts.cpp
+// Sherlock — Source/Facts/ImageFacts.cpp
 // __TEXT.__text scanned once: calls resolved through BranchIsland, literals through LiteralReaders.
 #include <Facts/BranchIsland.h>
 #include <Facts/ImageFacts.h>

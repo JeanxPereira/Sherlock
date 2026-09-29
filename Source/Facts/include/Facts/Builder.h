@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/include/Facts/Builder.h
+// Sherlock — Source/Facts/include/Facts/Builder.h
 // The catalog, per-image stores, and the worker threads that fill them (derived).
 #pragma once
 

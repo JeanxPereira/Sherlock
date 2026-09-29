@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/Arguments.cpp
+// Sherlock — Source/SherlockCli/Arguments.cpp
 // argv walk: flags with a value consume the next token, "--towers" is boolean, an unknown "--x" is a Usage error.
 #include <SherlockCli/Arguments.h>
 

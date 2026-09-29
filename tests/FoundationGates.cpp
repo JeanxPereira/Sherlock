@@ -1,4 +1,4 @@
-// Sherlock — tests/Sherlock/FoundationGates.cpp
+// Sherlock — tests/FoundationGates.cpp
 // Diagnostic text, bounds-checked reads, and mapping lifetime.
 #include <Foundation/ByteReader.h>
 #include <Foundation/Diagnostic.h>

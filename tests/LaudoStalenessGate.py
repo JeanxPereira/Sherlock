@@ -5,7 +5,7 @@ scratch repo, then edits that laudo's content and forces its mtime forward, and 
 the file on disk -- the mutation that proves the per-file stamp actually bites.
 
 exit 0 = PASS  1 = FAIL  2 = NOT VERIFIED
-python tests/Sherlock/LaudoStalenessGate.py <Sherlock.exe> <scratch dir>
+python tests/LaudoStalenessGate.py <Sherlock.exe> <scratch dir>
 """
 import os
 import shutil

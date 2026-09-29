@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DyldSharedCache/include/DyldSharedCache/Cache.h
+// Sherlock — Source/DyldSharedCache/include/DyldSharedCache/Cache.h
 // The main cache file and its subcaches, read as one virtual address space (Apple name: dyld shared cache).
 #pragma once
 

@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/SherlockCli/Demangler.cpp
+// Sherlock — Source/SherlockCli/Demangler.cpp
 // LoadLibraryW/GetProcAddress/FreeLibrary behind Demangler.
 #include <SherlockCli/Demangler.h>
 

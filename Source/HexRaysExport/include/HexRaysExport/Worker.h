@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/HexRaysExport/include/HexRaysExport/Worker.h
+// Sherlock — Source/HexRaysExport/include/HexRaysExport/Worker.h
 // One image in, one layer-2 store out: the worker's options and what it reports (derived).
 #pragma once
 

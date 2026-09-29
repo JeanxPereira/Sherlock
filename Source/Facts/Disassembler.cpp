@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/Facts/Disassembler.cpp
+// Sherlock — Source/Facts/Disassembler.cpp
 // capstone lifetime and cs_disasm_iter behind Disassembler::Stream.
 #include <Facts/Disassembler.h>
 

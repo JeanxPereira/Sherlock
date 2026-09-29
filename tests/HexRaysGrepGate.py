@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Sherlock -- tests/Sherlock/HexRaysGrepGate.py
+# Sherlock -- tests/HexRaysGrepGate.py
 # `grep` is the one query whose ZERO is dangerous, and this gate is about the zero rather than
 # about the hits. Four ways this search can be silent, and they are indistinguishable in the
 # output unless it names them:

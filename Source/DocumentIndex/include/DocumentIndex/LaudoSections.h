@@ -1,4 +1,4 @@
-// Sherlock — tools/Sherlock/Source/DocumentIndex/include/DocumentIndex/LaudoSections.h
+// Sherlock — Source/DocumentIndex/include/DocumentIndex/LaudoSections.h
 // SplitDocument: one file -> its DocSection rows, laudo or concept page (derived).
 #pragma once
 
