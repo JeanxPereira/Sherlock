@@ -51,20 +51,20 @@ namespace Sherlock::Configuration
         }
 
         // Relative, forward slashes, no trailing slash, never above the root.
-        Foundation::Expected<std::string> NormalizePath(const std::string& raw, const std::filesystem::path& file)
+        Foundation::Expected<std::string> NormalizePath(const std::string& raw, std::string_view what, const std::filesystem::path& file)
         {
             const std::filesystem::path path(raw);
             if (raw.empty() || path.is_absolute() || path.has_root_name() || path.has_root_directory())
             {
-                return Refuse(file, std::format("collection \"{}\": the path is not relative to sherlock.json's directory", raw),
+                return Refuse(file, std::format("{} \"{}\": the path is not relative to sherlock.json's directory", what, raw),
                               "write the path relative to the directory holding sherlock.json");
             }
             auto normal = path.lexically_normal().generic_string();
             while (normal.size() > 1 && normal.back() == '/') normal.pop_back();
             if (normal == ".." || normal.starts_with("../"))
             {
-                return Refuse(file, std::format("collection \"{}\": the path leaves sherlock.json's directory", raw),
-                              "declare only directories under the consumer's root");
+                return Refuse(file, std::format("{} \"{}\": the path leaves sherlock.json's directory", what, raw),
+                              "declare only paths under the consumer's root");
             }
             return normal;
         }
@@ -156,7 +156,9 @@ namespace Sherlock::Configuration
             {
                 return Refuse(file, "\"towers\" is not a path", "name the towers file relative to sherlock.json");
             }
-            config.Towers = config.Root / std::filesystem::path(json["towers"].get<std::string>());
+            auto towers = NormalizePath(json["towers"].get<std::string>(), "\"towers\"", file);
+            if (!towers) return std::unexpected(towers.error());
+            config.Towers = config.Root / std::filesystem::path(*towers);
         }
 
         const auto& collections = json["collections"];
@@ -181,7 +183,7 @@ namespace Sherlock::Configuration
             {
                 return Refuse(file, std::format("{}\"kind\" is missing or not a string", where), "a kind is evidence, concept or code");
             }
-            auto path = NormalizePath(entry["path"].get<std::string>(), file);
+            auto path = NormalizePath(entry["path"].get<std::string>(), "collection", file);
             if (!path) return std::unexpected(path.error());
 
             DocumentIndex::Collection collection;

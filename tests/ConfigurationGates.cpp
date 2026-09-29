@@ -113,6 +113,18 @@ namespace
         ExpectRefused(Replaced(kValid, R"("path": "docs/re")", R"("path": "C:/docs/re")"), "not relative", "an absolute collection path");
         ExpectRefused(Replaced(kValid, R"("path": "docs/re")", R"("path": "../outside")"), "leaves sherlock.json's directory", "a collection above the root");
         ExpectRefused(Replaced(kValid, R"("towers": "towers.json")", R"("towers": 7)"), R"("towers" is not a path)", "a towers value that is not a path");
+        ExpectRefused(Replaced(kValid, R"("towers": "towers.json")", R"("towers": "C:/x")"), R"("towers" "C:/x")", "an absolute towers path");
+        ExpectRefused(Replaced(kValid, R"("towers": "towers.json")", R"("towers": "../x")"), R"("towers" "../x")", "a towers path above the root");
+        for (const char* form : {"/x", "C:x", "//server/share/x"})
+        {
+            ExpectRefused(Replaced(kValid, R"("path": "docs/re")", std::string(R"("path": ")") + form + "\""), "not relative",
+                          std::string("a collection path written ") + form);
+            ExpectRefused(Replaced(kValid, R"("towers": "towers.json")", std::string(R"("towers": ")") + form + "\""), R"("towers")",
+                          std::string("a towers path written ") + form);
+        }
+        ExpectRefused(Replaced(kValid, R"("sherlock": "0.2")", R"("sherlock": 7)"), R"("sherlock" is not a string)", "a non-string version requirement");
+        ExpectRefused(Replaced(kValid, R"("path": "docs/re")", R"("path": 7)"), R"("path" is missing or not a string)", "a non-string collection path");
+        ExpectRefused(Replaced(kValid, R"("kind": "evidence")", R"("kind": 7)"), R"("kind" is missing or not a string)", "a non-string collection kind");
     }
 
     void GateRequirement()
@@ -125,7 +137,8 @@ namespace
                    std::format("{} accepts Sherlock {}", required, running));
         }
         for (const auto& [required, running] : std::initializer_list<Pair>{
-                 {"0.2.1", "0.2.0"}, {"0.3", "0.2.0"}, {"0.1", "0.2.0"}, {"2.0", "1.9.9"}, {"1.4", "1.3.0"}})
+                 {"0.2.1", "0.2.0"}, {"0.3", "0.2.0"}, {"0.1", "0.2.0"}, {"2.0", "1.9.9"}, {"1.4", "1.3.0"},
+                 {"1.2", "2.0.0"}, {"0.2", "1.0.0"}, {"1.2", "2.3.0"}, {"0.2", "1.2.0"}})
         {
             const auto checked = Configuration::CheckRequirement(required, running);
             const auto text    = checked ? std::string("accepted") : checked.error().Format();
@@ -190,6 +203,17 @@ namespace
         const auto sha = Configuration::Sha256Hex(kValid);
         Expect(loaded && sha && loaded->Corpus.ConfigSha256 == *sha, "Load records the SHA-256 of the file's bytes");
         Expect(loaded && loaded->Root.is_absolute(), "Load resolves the root to an absolute path");
+        const std::string bom = "\xEF\xBB\xBF";
+        Write(root / "bom" / "sherlock.json", bom + kValid);
+        Write(root / "bom" / "towers.json", "{}");
+        Write(root / "bom" / "docs" / "re" / "a.md", "# 1 A\n");
+        Write(root / "bom" / "docs" / "concepts" / "c.md", "---\ntitle: C\naliases: []\n---\n");
+        Write(root / "bom" / "Source" / "s.h", "// [BIN] Sample 0x240622d98\n");
+        const auto bomLoaded = Configuration::Load(root / "bom" / "sherlock.json", "0.2.0");
+        const auto withBom   = Configuration::Sha256Hex(bom + kValid);
+        Expect(bomLoaded.has_value(), "a BOM sherlock.json loads" + (bomLoaded ? std::string() : ": " + bomLoaded.error().Format()));
+        Expect(bomLoaded && withBom && sha && bomLoaded->Corpus.ConfigSha256 == *withBom && *withBom != *sha,
+               "the hash covers the BOM file's bytes, BOM included");
         const auto old = Configuration::Load(root / "sherlock.json", "0.1.0");
         Expect(!old && old.error().Format().find("requires Sherlock 0.2 and this is Sherlock 0.1.0") != std::string::npos,
                "Load checks the version requirement");
