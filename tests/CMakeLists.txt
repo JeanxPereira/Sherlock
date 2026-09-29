@@ -38,6 +38,7 @@ endfunction()
 sherlock_gate(FoundationGates LINKS Sherlock::Foundation)
 sherlock_gate(StoreGates LINKS Sherlock::Store)
 sherlock_gate(DocumentIndexGates LINKS Sherlock::DocumentIndex)
+sherlock_gate(ConfigurationGates LINKS Sherlock::Configuration)
 sherlock_gate(HexRaysStoreGates LINKS Sherlock::HexRaysExport)
 
 sherlock_gate(CliGates LINKS Sherlock::Facts Sherlock::HexRaysExport)

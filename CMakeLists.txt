@@ -60,6 +60,12 @@ sherlock_module(DocumentIndex
             ${S}/DocumentIndex/FileStamp.cpp ${S}/DocumentIndex/Builder.cpp
     LINKS Sherlock::Foundation Sherlock::Store)
 
+# sherlock.json: the consumer's layout, tags and version requirement. JSON and CNG stay here, so
+# DocumentIndex reads a Corpus and never a file format.
+sherlock_module(Configuration
+    SOURCES ${S}/Configuration/Config.cpp ${S}/Configuration/Requirement.cpp ${S}/Configuration/Sha256.cpp
+    LINKS Sherlock::Foundation Sherlock::DocumentIndex nlohmann_json::nlohmann_json bcrypt)
+
 # No IDA header reaches this module: the CLI and the gates read layer 2 without the SDK, and
 # only the worker's own translation unit decompiles.
 sherlock_module(HexRaysExport
