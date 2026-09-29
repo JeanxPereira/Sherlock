@@ -7,6 +7,7 @@
 #include <Store/Database.h>
 #include <Store/Schema.h>
 
+#include "ConsumerFixture.h"
 #include "SherlockHarness.h"
 
 #include <algorithm>
@@ -120,7 +121,7 @@ namespace
         Cli::QueryEnvironment env;
         env.Store     = fixture.Store;
         env.Documents = withDocuments ? fixture.Documents : std::filesystem::path{};
-        env.Repo      = fixture.Root;
+        env.Consumer  = FixtureConsumer(fixture.Root);
         env.Json      = true; // Emit() still fills Output without printing to stdout
         env.Output    = &output;
         return env;
@@ -135,7 +136,7 @@ namespace
         for (const auto& line : output)
         {
             if (line.starts_with("layer 3: not built")) sawNotBuilt = true;
-            if (line.find("Sherlock build docs --repo") != std::string::npos) sawBuildCommand = true;
+            if (line.find("Sherlock build docs --config") != std::string::npos) sawBuildCommand = true;
             if (line.find("section(s)") != std::string::npos) sawSectionCount = true;
         }
         Expect(sawNotBuilt, "status reports layer 3 as not built when Documents.db is absent");
@@ -150,7 +151,7 @@ namespace
         Cli::PrintDocumentLayer(Environment(fixture, output, false), 0x27c198c20);
         Expect(output.size() == 1 && output.front().starts_with("layer 3: not built"),
                "q's layer 3 block prints exactly one line when Documents.db is absent, nothing else");
-        Expect(!output.empty() && output.front().find("Sherlock build docs --repo") != std::string::npos,
+        Expect(!output.empty() && output.front().find("Sherlock build docs --config") != std::string::npos,
                "q's not-built line names the exact command that builds layer 3 -- a message that "
                "names the fix instead of an agent hunting for a Documents.db path");
     }
@@ -584,11 +585,48 @@ namespace
     }
 }
 
+    void GateQueryLayerWithoutConsumer(const Fixture& fixture)
+    {
+        std::vector<std::string> output;
+        auto env = Environment(fixture, output, true);
+        env.Consumer = std::unexpected(Configuration::NotLoaded());
+        Cli::PrintDocumentLayer(env, 0x27c198c20);
+        Expect(output.size() == 1 && output.front().starts_with("layer 3: NOT VERIFIED") &&
+                   output.front().find("sherlock.json") != std::string::npos,
+               "q's layer 3 without a configuration is one NOT VERIFIED line naming sherlock.json, never 'not built'");
+    }
+
+    void GateQueryLayerStaleConfiguration(const Fixture& fixture)
+    {
+        std::vector<std::string> output;
+        auto env = Environment(fixture, output, true);
+        env.Consumer->Corpus.ConfigSha256 = std::string(64, 'a');
+        Cli::PrintDocumentLayer(env, 0x27c198c20);
+        Expect(output.size() == 1 && output.front().starts_with("layer 3: stale") &&
+                   output.front().find("Sherlock build docs --config") != std::string::npos,
+               "q's layer 3 over a store built from other configuration bytes says stale and names the rebuild");
+    }
+
+    void GateStatusStaleConfiguration(const Fixture& fixture)
+    {
+        std::vector<std::string> output;
+        auto env = Environment(fixture, output, true);
+        env.Consumer->Corpus.ConfigSha256 = std::string(64, 'a');
+        const auto verdict = Cli::RunStatus(env);
+        Expect(verdict.Kind == Cli::VerdictKind::Found, "status still answers over a store built from another configuration");
+        Expect(std::any_of(output.begin(), output.end(),
+                           [](const std::string& line) { return line.starts_with("configuration: "); }),
+               "status names the configuration change");
+    }
+
 int main()
 {
     const auto fixture = CreateFixture();
     GateStatusWithoutDocuments(fixture);
     GateQueryLayerNotBuilt(fixture);
+    GateQueryLayerWithoutConsumer(fixture);
+    GateQueryLayerStaleConfiguration(fixture);
+    GateStatusStaleConfiguration(fixture);
     GateQueryLayerCitedAndSealed(fixture);
     GateQueryLayerBlindSpot(fixture);
     GateQueryLayerTruncation(fixture);

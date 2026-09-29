@@ -6,9 +6,11 @@
 #include <Store/Database.h>
 #include <Store/Schema.h>
 
+#include "ConsumerFixture.h"
 #include "CorpusFixture.h"
 #include "SherlockHarness.h"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <string>
@@ -97,7 +99,7 @@ namespace
 
     Cli::QueryEnvironment Environment(const Fixture& fixture, std::vector<std::string>& output, bool json = true)
     {
-        return {{}, fixture.Documents, fixture.Root, false, json, &output};
+        return {{}, fixture.Documents, FixtureConsumer(fixture.Root), false, json, &output};
     }
 
     void GateLaudoByteExactAndJsonParity(const Fixture& fixture)
@@ -340,6 +342,40 @@ namespace
     }
 }
 
+    // A Documents.db built from other sherlock.json bytes -- or by a Sherlock that recorded none,
+    // which is what this fixture store is -- is stale for every file: find marks its hits and laudo
+    // refuses the section. It is never served as fresh.
+    void GateConfigurationChangeIsStale(const Fixture& fixture)
+    {
+        std::vector<std::string> output;
+        auto env = Environment(fixture, output);
+        env.Consumer->Corpus.ConfigSha256 = std::string(64, 'a');
+        const auto found = Cli::RunFind(env, "shadow pool");
+        Expect(found.Kind == Cli::VerdictKind::Found, "find still answers from a store built from another configuration");
+        Expect(std::any_of(output.begin(), output.end(),
+                           [](const std::string& line) { return line.find("[stale]") != std::string::npos; }),
+               "find marks its hits [stale] when the store's configuration differs");
+
+        std::vector<std::string> sectionOutput;
+        auto sectionEnv = Environment(fixture, sectionOutput);
+        sectionEnv.Consumer->Corpus.ConfigSha256 = std::string(64, 'a');
+        const auto section = Cli::RunLaudo(sectionEnv, "sample", "\xC2\xA7" "7");
+        Expect(section.Kind == Cli::VerdictKind::NotVerified &&
+                   section.Why.find("sherlock.json has changed") != std::string::npos,
+               "laudo refuses a section from a store built from another configuration");
+    }
+
+    void GateDocumentsWithoutConsumerIsNotVerified(const Fixture& fixture)
+    {
+        std::vector<std::string> output;
+        auto env = Environment(fixture, output);
+        env.Consumer = std::unexpected(Configuration::NotLoaded());
+        Expect(Cli::RunFind(env, "shadow pool").Kind == Cli::VerdictKind::NotVerified,
+               "find without a configuration is NOT VERIFIED");
+        Expect(Cli::RunLaudo(env, "sample", "\xC2\xA7" "7").Kind == Cli::VerdictKind::NotVerified,
+               "laudo without a configuration is NOT VERIFIED");
+    }
+
 int main()
 {
     const auto fixture = CreateFixture();
@@ -351,6 +387,13 @@ int main()
     GateDocumentsSchemaRefusal();
     GateAmbiguousSlugIsNotVerified();
     GateMissingFileRowIsNotVerified();
+    {
+        // The shared fixture's Section table is dropped by the sqlite-failure gate; these gates read a whole store.
+        const auto configured = CreateFixture();
+        GateConfigurationChangeIsStale(configured);
+        GateDocumentsWithoutConsumerIsNotVerified(configured);
+        std::filesystem::remove_all(configured.Root);
+    }
     GateBuildDocumentsPublishesAtomically();
     std::filesystem::remove_all(fixture.Root);
     return Finish();

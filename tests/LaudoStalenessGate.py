@@ -18,10 +18,17 @@ LAUDO_TEXT = """## §1 A throwaway section
 Some prose that never changes... until the mutation does.
 """
 
+CONFIG = """{
+  "schema": 1,
+  "sherlock": "0.2",
+  "collections": [ { "path": "docs/re", "kind": "evidence" } ]
+}
+"""
+
 
 def run(sherlock, scratch, *args):
     return subprocess.run(
-        [sherlock, *args, "--repo", scratch, "--documents", os.path.join(scratch, "Documents.db")],
+        [sherlock, *args, "--config", os.path.join(scratch, "sherlock.json"), "--documents", os.path.join(scratch, "Documents.db")],
         capture_output=True, text=True)
 
 
@@ -43,6 +50,8 @@ def main():
     os.makedirs(os.path.join(scratch, "docs", "concepts"), exist_ok=True)
     os.makedirs(os.path.join(scratch, "Source"), exist_ok=True)
     write_git_head(scratch)
+    with open(os.path.join(scratch, "sherlock.json"), "w", encoding="utf-8") as fh:
+        fh.write(CONFIG)
     laudo_path = os.path.join(scratch, "docs", "re", "staleness-sample.md")
     with open(laudo_path, "w", encoding="utf-8") as fh:
         fh.write(LAUDO_TEXT)

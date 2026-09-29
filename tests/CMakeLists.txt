@@ -47,12 +47,12 @@ target_sources(SherlockTestCliGates PRIVATE
 target_include_directories(SherlockTestCliGates PRIVATE ${S}/SherlockCli/include)
 target_link_libraries(SherlockTestCliGates PRIVATE nlohmann_json::nlohmann_json)
 
-sherlock_gate(DocumentsGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::DyldSharedCache)
+sherlock_gate(DocumentsGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::Configuration Sherlock::DyldSharedCache)
 target_sources(SherlockTestDocumentsGates PRIVATE ${S}/SherlockCli/Documents.cpp)
 target_include_directories(SherlockTestDocumentsGates PRIVATE ${S}/SherlockCli/include)
 
 # Queries.cpp reads layer 2 and disassembles for --asm, so this target carries both modules.
-sherlock_gate(DocumentLayerGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::DyldSharedCache Sherlock::Facts Sherlock::HexRaysExport)
+sherlock_gate(DocumentLayerGates LINKS Sherlock::Store Sherlock::DocumentIndex Sherlock::Configuration Sherlock::DyldSharedCache Sherlock::Facts Sherlock::HexRaysExport)
 target_sources(SherlockTestDocumentLayerGates PRIVATE ${S}/SherlockCli/Queries.cpp)
 target_include_directories(SherlockTestDocumentLayerGates PRIVATE ${S}/SherlockCli/include)
 
@@ -147,9 +147,20 @@ if(SHERLOCK_CORPUS)
             FIXTURES_REQUIRED SherlockStore
             PASS_REGULAR_EXPRESSION "0x240679e58")
 
-    # --documents names a path that never exists, so the answer cannot depend on run order.
+    # A consumer with one evidence page, so the configuration loads; --documents names a path that
+    # never exists, so the answer cannot depend on run order.
+    set(SHERLOCK_NO_DOCUMENTS_ROOT ${CMAKE_CURRENT_BINARY_DIR}/SherlockNoDocumentsConsumer)
+    file(MAKE_DIRECTORY ${SHERLOCK_NO_DOCUMENTS_ROOT}/docs/re)
+    file(WRITE ${SHERLOCK_NO_DOCUMENTS_ROOT}/docs/re/page.md "## 1 A page
+
+Text.
+")
+    file(WRITE ${SHERLOCK_NO_DOCUMENTS_ROOT}/sherlock.json
+        "{ \"schema\": 1, \"sherlock\": \"0.2\", \"collections\": [ { \"path\": \"docs/re\", \"kind\": \"evidence\" } ] }
+")
     add_test(NAME Sherlock.QueryNoDocuments
             COMMAND $<TARGET_FILE:Sherlock> q 0x240622d98 --cache ${SHERLOCK_CACHE} --store ${SHERLOCK_STORE}
+                    --config ${SHERLOCK_NO_DOCUMENTS_ROOT}/sherlock.json
                     --documents ${CMAKE_CURRENT_BINARY_DIR}/SherlockDocumentsCorpus/DoesNotExist.db)
     set_tests_properties(Sherlock.QueryNoDocuments PROPERTIES
             FIXTURES_REQUIRED SherlockStore

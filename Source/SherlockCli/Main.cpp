@@ -1,5 +1,6 @@
 // Sherlock — Source/SherlockCli/Main.cpp
 // Entry point: --version, `build facts`, and the facts and documents query commands.
+#include <Configuration/Config.h>
 #include <DyldSharedCache/Cache.h>
 #include <DocumentIndex/Builder.h>
 #include <Facts/Builder.h>
@@ -7,7 +8,6 @@
 #include <SherlockCli/Demangler.h>
 #include <SherlockCli/Documents.h>
 #include <SherlockCli/HexRays.h>
-#include <SherlockCli/LegacyCorpus.h>
 #include <SherlockCli/Queries.h>
 #include <SherlockCli/Towers.h>
 
@@ -22,10 +22,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 using namespace Sherlock;
@@ -68,7 +70,7 @@ namespace
         return static_cast<std::uint64_t>(address);
     }
 
-    int RunBuildFacts(const Cli::Invocation& invocation)
+    int RunBuildFacts(const Cli::Invocation& invocation, const Configuration::Config& consumer)
     {
         if (invocation.Cache.empty() || invocation.Store.empty())
         {
@@ -77,7 +79,14 @@ namespace
                          invocation.Json);
             return 2;
         }
-        auto build = Cli::ReadTowersBuild(invocation.Towers);
+        if (consumer.Towers.empty())
+        {
+            PrintVerdict({Cli::VerdictKind::NotVerified, 0,
+                          consumer.File.string() + " declares no \"towers\"; build facts reads the tower map from it", 0, 0},
+                         invocation.Json);
+            return 2;
+        }
+        auto build = Cli::ReadTowersBuild(consumer.Towers);
         if (!build)
         {
             PrintVerdict({Cli::VerdictKind::NotVerified, 0, build.error().Format(), 0, 0}, invocation.Json);
@@ -89,7 +98,7 @@ namespace
             PrintVerdict({Cli::VerdictKind::NotVerified, 0, cache.error().Format(), 0, 0}, invocation.Json);
             return 2;
         }
-        auto towers = Cli::ReadTowers(invocation.Towers);
+        auto towers = Cli::ReadTowers(consumer.Towers);
         if (!towers)
         {
             PrintVerdict({Cli::VerdictKind::NotVerified, 0, towers.error().Format(), 0, 0}, invocation.Json);
@@ -173,16 +182,10 @@ namespace
         return report->Failed.empty() ? 0 : (notVerified ? 2 : 1);
     }
 
-    int RunBuildDocs(const Cli::Invocation& invocation)
+    int RunBuildDocs(const Cli::Invocation& invocation, const Configuration::Config& consumer,
+                     const std::filesystem::path& documents)
     {
-        if (invocation.Repo.empty() || invocation.Documents.empty())
-        {
-            PrintVerdict({Cli::VerdictKind::NotVerified, 0,
-                          "build docs requires --repo and --documents (or their SHERLOCK_* variables)", 0, 0},
-                         invocation.Json);
-            return 2;
-        }
-        auto report = DocumentIndex::BuildDocuments(Cli::LegacyCorpus(invocation.Repo), invocation.Documents);
+        auto report = DocumentIndex::BuildDocuments(consumer.Corpus, documents);
         if (!report)
         {
             PrintVerdict({Cli::VerdictKind::NotVerified, 0, report.error().Format(), 0, 0}, invocation.Json);
@@ -211,13 +214,39 @@ int main(int argc, char** argv)
         std::printf("Sherlock %s\n", SHERLOCK_VERSION);
         return 0;
     }
-    if (invocation->Command == "build" && !invocation->Positional.empty() && invocation->Positional.front() == "facts")
+    const bool building       = invocation->Command == "build" && !invocation->Positional.empty();
+    const bool buildFacts     = building && invocation->Positional.front() == "facts";
+    const bool buildDocs      = building && invocation->Positional.front() == "docs";
+    const bool documentsQuery = invocation->Command == "find" || invocation->Command == "laudo";
+    // A command whose whole answer comes from the consumer refuses without its configuration; q and
+    // status read it for layer 3 alone and report its absence on that layer's line.
+    const bool needsConsumer = buildFacts || buildDocs || documentsQuery;
+    const bool readsConsumer = needsConsumer || invocation->Command == "q" || invocation->Command == "status";
+    Foundation::Expected<Configuration::Config> consumer = std::unexpected(Configuration::NotLoaded());
+    if (readsConsumer)
     {
-        return RunBuildFacts(*invocation);
+        std::error_code cwdError;
+        const auto file = Configuration::Discover(invocation->Config, std::filesystem::current_path(cwdError));
+        if (file)
+            consumer = Configuration::Load(*file, SHERLOCK_VERSION);
+        else
+            consumer = std::unexpected(file.error());
     }
-    if (invocation->Command == "build" && !invocation->Positional.empty() && invocation->Positional.front() == "docs")
+    if (needsConsumer && !consumer)
     {
-        return RunBuildDocs(*invocation);
+        PrintVerdict({Cli::VerdictKind::NotVerified, 0, consumer.error().Format(), 0, 0}, invocation->Json);
+        return 2;
+    }
+    const std::filesystem::path documents = !invocation->Documents.empty() ? invocation->Documents
+                                            : consumer ? Configuration::DefaultDocuments(*consumer)
+                                                       : std::filesystem::path{};
+    if (buildFacts)
+    {
+        return RunBuildFacts(*invocation, *consumer);
+    }
+    if (buildDocs)
+    {
+        return RunBuildDocs(*invocation, *consumer, documents);
     }
     if (invocation->Command == "build" && !invocation->Positional.empty() &&
         invocation->Positional.front() == "hexrays")
@@ -230,7 +259,6 @@ int main(int argc, char** argv)
     const bool factsQuery = invocation->Command == "q" || invocation->Command == "callers" ||
                             invocation->Command == "calls" || invocation->Command == "refs" ||
                             invocation->Command == "fn" || invocation->Command == "vcall";
-    const bool documentsQuery = invocation->Command == "find" || invocation->Command == "laudo";
     // grep reads layer 2 and the catalog, and never the cache: a text search over stored
     // pseudocode needs no address to resolve and no image to map.
     const bool grepQuery = invocation->Command == "grep";
@@ -255,7 +283,7 @@ int main(int argc, char** argv)
     }
 
     std::vector<std::string> output;
-    Cli::QueryEnvironment env{invocation->Store, invocation->Documents, invocation->Repo, invocation->Full,
+    Cli::QueryEnvironment env{invocation->Store, documents, consumer, invocation->Full,
                               invocation->Json, &output};
     const auto printHeader = [&]() {
         const auto header = Cli::PrintHeader(env, "");

@@ -35,45 +35,6 @@ namespace Sherlock::Cli
             }
             return value;
         }
-
-        std::filesystem::path DefaultTowersPath()
-        {
-            std::filesystem::path dir = std::filesystem::current_path();
-            for (int depth = 0; depth < 32; ++depth)
-            {
-                const auto candidate = dir / "References" / "scripts" / "towers.json";
-                if (std::filesystem::exists(candidate))
-                {
-                    return candidate;
-                }
-                const auto parent = dir.parent_path();
-                if (parent.empty() || parent == dir)
-                {
-                    break;
-                }
-                dir = parent;
-            }
-            return {};
-        }
-
-        std::filesystem::path DefaultRepoRoot()
-        {
-            std::filesystem::path dir = std::filesystem::current_path();
-            for (int depth = 0; depth < 32; ++depth)
-            {
-                if (std::filesystem::is_directory(dir / "docs" / "re") && std::filesystem::is_directory(dir / "Source"))
-                {
-                    return dir;
-                }
-                const auto parent = dir.parent_path();
-                if (parent.empty() || parent == dir)
-                {
-                    break;
-                }
-                dir = parent;
-            }
-            return {};
-        }
     }
 
     Expected<Invocation> ParseArguments(int argc, char** argv)
@@ -86,7 +47,6 @@ namespace Sherlock::Cli
         std::vector<std::string> args(argv + 1, argv + argc);
 
         Invocation invocation;
-        bool documentsExplicit = false;
         if (args[0] == "--version")
         {
             invocation.Command = "version";
@@ -102,15 +62,9 @@ namespace Sherlock::Cli
         {
             invocation.Store = env;
         }
-        invocation.Repo = DefaultRepoRoot();
-        if (const char* env = std::getenv("SHERLOCK_REPO"); env != nullptr)
-        {
-            invocation.Repo = env;
-        }
         if (const char* env = std::getenv("SHERLOCK_DOCUMENTS"); env != nullptr)
         {
             invocation.Documents = env;
-            documentsExplicit = true;
         }
         if (const char* env = std::getenv("SHERLOCK_IMAGES"); env != nullptr)
         {
@@ -120,7 +74,6 @@ namespace Sherlock::Cli
         {
             invocation.IdaDir = env;
         }
-        invocation.Towers = DefaultTowersPath();
 
         for (std::size_t i = 1; i < args.size(); ++i)
         {
@@ -146,18 +99,17 @@ namespace Sherlock::Cli
                 if (!v) return std::unexpected(v.error());
                 invocation.Store = *v;
             }
-            else if (arg == "--repo")
+            else if (arg == "--config")
             {
                 const auto v = next();
                 if (!v) return std::unexpected(v.error());
-                invocation.Repo = *v;
+                invocation.Config = *v;
             }
             else if (arg == "--documents")
             {
                 const auto v = next();
                 if (!v) return std::unexpected(v.error());
                 invocation.Documents = *v;
-                documentsExplicit = true;
             }
             else if (arg == "--min-free-memory")
             {
@@ -275,10 +227,6 @@ namespace Sherlock::Cli
             {
                 invocation.Positional.push_back(arg);
             }
-        }
-        if (!documentsExplicit && !invocation.Repo.empty())
-        {
-            invocation.Documents = invocation.Repo / "build" / "Sherlock" / "Documents.db";
         }
         return invocation;
     }

@@ -18,7 +18,7 @@ namespace Sherlock::Cli
     {
         std::string                  Command;
         std::vector<std::string>     Positional;
-        std::filesystem::path        Cache, Store, Towers, Documents, Repo;
+        std::filesystem::path        Cache, Store, Documents, Config;
         // Layer 2 only: the extracted images IDA opens, and the IDA whose DLLs the worker loads.
         std::filesystem::path        ImagesDir, IdaDir;
         std::vector<std::string>     Images;

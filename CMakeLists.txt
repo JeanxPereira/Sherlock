@@ -1,7 +1,7 @@
 # Sherlock — CMakeLists.txt
 # The Sherlock project: its version, its modules and their edges, its gates, its installation.
 cmake_minimum_required(VERSION 3.28)
-project(Sherlock VERSION 0.1.0 LANGUAGES C CXX)
+project(Sherlock VERSION 0.2.0 LANGUAGES C CXX)
 
 # IDA's import libraries and DLLs are built against the release CRT, and the layer-2 worker
 # links them. Two CRTs in one binary do not link, so every target in this directory -- the
@@ -102,7 +102,7 @@ add_executable(Sherlock
     ${S}/SherlockCli/Documents.cpp
     ${S}/SherlockCli/HexRays.cpp)
 target_include_directories(Sherlock PRIVATE ${S}/SherlockCli/include)
-target_link_libraries(Sherlock PRIVATE Sherlock::Facts Sherlock::DocumentIndex Sherlock::HexRaysExport nlohmann_json::nlohmann_json Psapi)
+target_link_libraries(Sherlock PRIVATE Sherlock::Facts Sherlock::DocumentIndex Sherlock::Configuration Sherlock::HexRaysExport nlohmann_json::nlohmann_json Psapi)
 sherlock_compile_options(Sherlock)
 
 option(SHERLOCK_BUILD_TESTS "Builds Sherlock's gates" ${PROJECT_IS_TOP_LEVEL})

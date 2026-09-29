@@ -2,6 +2,7 @@
 // q, callers, calls, refs, status -- each opens the image stores it needs and returns one Verdict (derived).
 #pragma once
 
+#include <Configuration/Config.h>
 #include <DyldSharedCache/Cache.h>
 #include <Foundation/Diagnostic.h>
 #include <SherlockCli/Verdict.h>
@@ -19,7 +20,8 @@ namespace Sherlock::Cli
     {
         std::filesystem::path Store;
         std::filesystem::path Documents;
-        std::filesystem::path Repo;
+        // The consumer's configuration, or why there is none: layer 3 reads the one or reports the other.
+        Foundation::Expected<Configuration::Config> Consumer = std::unexpected(Configuration::NotLoaded());
         bool                  Full = false;
         bool                  Json = false;
         std::vector<std::string>* Output = nullptr;

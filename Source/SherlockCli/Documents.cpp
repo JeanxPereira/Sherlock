@@ -2,6 +2,7 @@
 // find and laudo query Documents.db and verify a returned document's one backing file.
 #include <SherlockCli/Documents.h>
 
+#include <DocumentIndex/Builder.h>
 #include <DocumentIndex/FileStamp.h>
 #include <SherlockCli/Queries.h>
 #include <Store/Database.h>
@@ -63,9 +64,11 @@ namespace Sherlock::Cli
             return Coverage{static_cast<std::uint64_t>(statement->Int(0)), static_cast<std::uint64_t>(statement->Int(1))};
         }
 
-        Foundation::Expected<bool> IsStale(Store::Database& db, const std::filesystem::path& repo,
-                                           std::string_view relativeFile)
+        Foundation::Expected<bool> IsStale(Store::Database& db, const QueryEnvironment& env, std::string_view relativeFile)
         {
+            // A store built from other configuration bytes describes another corpus, so every file in
+            // it is stale, whatever its own stamp says.
+            if (DocumentIndex::BuiltConfigSha256(db) != env.Consumer->Corpus.ConfigSha256) return true;
             auto statement = db.Prepare("SELECT Size, MTime FROM File WHERE Path = ?1");
             if (!statement) return std::unexpected(statement.error());
             if (auto ok = statement->Bind(1, relativeFile); !ok) return std::unexpected(ok.error());
@@ -83,7 +86,7 @@ namespace Sherlock::Cli
                                         "this section's own File row is missing from Documents.db",
                                         "rebuild it with Sherlock build docs");
             }
-            const auto current = DocumentIndex::StatFile(repo / std::string(relativeFile));
+            const auto current = DocumentIndex::StatFile(env.Consumer->Root / std::string(relativeFile));
             return !current || current->Size != static_cast<std::uintmax_t>(statement->Int(0)) ||
                    current->MTime != statement->Int(1);
         }
@@ -221,6 +224,7 @@ namespace Sherlock::Cli
 
     Verdict RunFind(const QueryEnvironment& env, std::string_view text)
     {
+        if (!env.Consumer) return {VerdictKind::NotVerified, 0, env.Consumer.error().Format(), 0, 0};
         auto db = OpenDocuments(env);
         if (!db) return {VerdictKind::NotVerified, 0, db.error().Format(), 0, 0};
         const auto coverage = DocumentsCoverage(*db);
@@ -254,7 +258,7 @@ namespace Sherlock::Cli
             auto [where, inserted] = staleness.try_emplace(file, false);
             if (inserted)
             {
-                const auto stale = IsStale(*db, env.Repo, file);
+                const auto stale = IsStale(*db, env, file);
                 if (!stale)
                     return {VerdictKind::NotVerified, count, stale.error().Format(), coverage->first, coverage->second};
                 where->second = *stale;
@@ -269,6 +273,7 @@ namespace Sherlock::Cli
 
     Verdict RunLaudo(const QueryEnvironment& env, std::string_view slug, std::string_view section)
     {
+        if (!env.Consumer) return {VerdictKind::NotVerified, 0, env.Consumer.error().Format(), 0, 0};
         auto db = OpenDocuments(env);
         if (!db) return {VerdictKind::NotVerified, 0, db.error().Format(), 0, 0};
         const auto coverage = DocumentsCoverage(*db);
@@ -299,7 +304,7 @@ namespace Sherlock::Cli
             }
             if (!rows.empty())
             {
-                const auto stale = IsStale(*db, env.Repo, rows.front().File);
+                const auto stale = IsStale(*db, env, rows.front().File);
                 if (!stale) return {VerdictKind::NotVerified, 0, stale.error().Format(), coverage->first, coverage->second};
                 if (*stale) EmitLine(env, std::format("  stale: {} has changed since Documents.db was built -- this outline may not match", rows.front().File));
             }
@@ -322,7 +327,14 @@ namespace Sherlock::Cli
             hit = *fallback;
         }
         if (!hit) return {VerdictKind::Empty, 0, {}, coverage->first, coverage->second};
-        const auto stale = IsStale(*db, env.Repo, hit->File);
+        if (DocumentIndex::BuiltConfigSha256(*db) != env.Consumer->Corpus.ConfigSha256)
+        {
+            return {VerdictKind::NotVerified, 0,
+                    std::format("sherlock.json has changed since Documents.db was built ({}) -- run Sherlock build docs",
+                                env.Consumer->File.string()),
+                    coverage->first, coverage->second};
+        }
+        const auto stale = IsStale(*db, env, hit->File);
         if (!stale) return {VerdictKind::NotVerified, 0, stale.error().Format(), coverage->first, coverage->second};
         if (*stale)
             return {VerdictKind::NotVerified, 0,

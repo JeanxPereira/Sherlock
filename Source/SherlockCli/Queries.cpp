@@ -1,7 +1,6 @@
 // Sherlock — Source/SherlockCli/Queries.cpp
 // Per-image-store SQL behind every subcommand, routed through DyldSharedCache::Cache::Owner.
 #include <SherlockCli/Queries.h>
-#include <SherlockCli/LegacyCorpus.h>
 
 #include <DocumentIndex/Builder.h>
 #include <DocumentIndex/FileStamp.h>
@@ -415,21 +414,15 @@ namespace Sherlock::Cli
             if (!env.Json) std::printf("%s\n", line.c_str());
         }
 
-        // The exact `Sherlock build docs` invocation that would populate Documents.db from this
-        // environment's own already-resolved --repo/--documents (Arguments.cpp's default,
-        // <repo>/build/Sherlock/Documents.db, when --documents was never explicit). Documents.db
-        // stays worktree-relative on purpose (the phase-2 plan's own "it follows the worktree"
-        // decision: layer 3 is derived from THIS working tree, not from the shared corpus store),
-        // so the fix here is not a cleverer default -- it is naming the one command that builds it,
-        // instead of an agent spending calls hunting for a path (finding 1).
+        // The exact `Sherlock build docs` invocation that populates Documents.db for this consumer,
+        // so an agent runs one command instead of hunting for a path.
         std::string BuildDocsCommand(const QueryEnvironment& env)
         {
-            const std::string repoArg = env.Repo.empty() ? std::string("<repo>") : env.Repo.string();
-            const std::filesystem::path fallbackDocuments =
-                env.Repo.empty() ? std::filesystem::path("<repo>/build/Sherlock/Documents.db")
-                                 : env.Repo / "build" / "Sherlock" / "Documents.db";
-            const std::string docsArg = env.Documents.empty() ? fallbackDocuments.string() : env.Documents.string();
-            return std::format("Sherlock build docs --repo {} --documents {}", repoArg, docsArg);
+            const std::string configArg = env.Consumer ? env.Consumer->File.string() : std::string("<sherlock.json>");
+            const std::string docsArg   = !env.Documents.empty() ? env.Documents.string()
+                                        : env.Consumer ? Configuration::DefaultDocuments(*env.Consumer).string()
+                                                       : std::string("<root>/build/Sherlock/Documents.db");
+            return std::format("Sherlock build docs --config {} --documents {}", configArg, docsArg);
         }
 
         void EmitLayerThreeNotBuilt(const QueryEnvironment& env)
@@ -753,6 +746,11 @@ namespace Sherlock::Cli
 
     void PrintDocumentLayer(const QueryEnvironment& env, std::uint64_t address)
     {
+        if (!env.Consumer)
+        {
+            Emit(env, std::format("layer 3: NOT VERIFIED -- {}", env.Consumer.error().Format()));
+            return;
+        }
         auto opened = OpenDocumentsOrNone(env);
         if (opened.UnreadableReason)
         {
@@ -762,6 +760,12 @@ namespace Sherlock::Cli
         if (!opened.Database)
         {
             EmitLayerThreeNotBuilt(env);
+            return;
+        }
+        if (DocumentIndex::BuiltConfigSha256(*opened.Database) != env.Consumer->Corpus.ConfigSha256)
+        {
+            Emit(env, std::format("layer 3: stale -- Documents.db was built from another sherlock.json; rebuild it with: {}",
+                                  BuildDocsCommand(env)));
             return;
         }
         auto& documents = *opened.Database;
@@ -1819,7 +1823,11 @@ namespace Sherlock::Cli
         Emit(env, "layer 2: not built");
 
         auto opened = OpenDocumentsOrNone(env);
-        if (opened.UnreadableReason)
+        if (!env.Consumer)
+        {
+            Emit(env, std::format("layer 3: NOT VERIFIED -- {}", env.Consumer.error().Format()));
+        }
+        else if (opened.UnreadableReason)
         {
             Emit(env, std::format("layer 3: NOT VERIFIED -- {}", *opened.UnreadableReason));
         }
@@ -1840,6 +1848,11 @@ namespace Sherlock::Cli
             {
                 Emit(env, std::format("head: {} (information only -- the check below is per file, not per commit)",
                                       *head));
+            }
+            if (DocumentIndex::BuiltConfigSha256(documents) != env.Consumer->Corpus.ConfigSha256)
+            {
+                Emit(env, std::format("configuration: {} changed since this store was built -- rebuild it with: {}",
+                                      env.Consumer->File.string(), BuildDocsCommand(env)));
             }
 
             // The one place this layer pays the full cost: a stat() per indexed file (cheap,
@@ -1874,7 +1887,7 @@ namespace Sherlock::Cli
                     if (!*row) break;
                     const std::string path(files->Text(0));
                     known.insert(path);
-                    const auto current = DocumentIndex::StatFile(env.Repo / path);
+                    const auto current = DocumentIndex::StatFile(env.Consumer->Root / path);
                     if (!current)
                     {
                         ++removed;
@@ -1895,17 +1908,17 @@ namespace Sherlock::Cli
                 }
                 for (const auto& file : *found)
                 {
-                    const auto rel = std::filesystem::relative(file, env.Repo).generic_string();
+                    const auto rel = std::filesystem::relative(file, env.Consumer->Root).generic_string();
                     if (!known.contains(rel))
                     {
                         ++added;
                     }
                 }
             };
-            for (const auto& collection : LegacyCorpus(env.Repo).Collections)
+            for (const auto& collection : env.Consumer->Corpus.Collections)
             {
                 if (scanError) break;
-                countNew(DocumentIndex::WalkCollection(env.Repo, collection));
+                countNew(DocumentIndex::WalkCollection(env.Consumer->Root, collection));
             }
 
             if (scanError)
