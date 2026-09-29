@@ -1,6 +1,7 @@
 // Sherlock — Source/SherlockCli/Queries.cpp
 // Per-image-store SQL behind every subcommand, routed through DyldSharedCache::Cache::Owner.
 #include <SherlockCli/Queries.h>
+#include <SherlockCli/LegacyCorpus.h>
 
 #include <DocumentIndex/Builder.h>
 #include <DocumentIndex/FileStamp.h>
@@ -1845,7 +1846,7 @@ namespace Sherlock::Cli
             // no content read) plus a walk for files the store has no row for at all -- this is
             // what catches an uncommitted in-place edit, which changes neither HEAD nor the total
             // file count (decision 8). The walk itself reuses BuildDocuments's own inclusion
-            // rule (DocumentIndex::IsIndexedMarkdown, DocumentIndex::WalkSourceForTesting) instead
+            // rule (DocumentIndex::IsIndexedMarkdown, DocumentIndex::WalkCollection) instead
             // of a second, hand-rolled one -- two rules for "is this file in the corpus" drift
             // apart the day one of them changes, and a stale README.md/index.md exclusion is
             // exactly how "added" ends up permanently nonzero (finding 1). A failure here (a
@@ -1901,9 +1902,11 @@ namespace Sherlock::Cli
                     }
                 }
             };
-            if (!scanError) countNew(DocumentIndex::WalkMarkdownForCli(env.Repo / "docs" / "re"));
-            if (!scanError) countNew(DocumentIndex::WalkMarkdownForCli(env.Repo / "docs" / "concepts"));
-            if (!scanError) countNew(DocumentIndex::WalkSourceForTesting(env.Repo / "Source", {}));
+            for (const auto& collection : LegacyCorpus(env.Repo).Collections)
+            {
+                if (scanError) break;
+                countNew(DocumentIndex::WalkCollection(env.Repo, collection));
+            }
 
             if (scanError)
             {

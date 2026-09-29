@@ -1,5 +1,5 @@
 // Sherlock — Source/DocumentIndex/SealExtractor.cpp
-// blocks()/TAG/BIN/ADDR, ported from lint_seals.py for Source/'s "//"-only comment style.
+// blocks()/TAG/BIN/ADDR shapes from lint_seals.py, over the consumer's tags, for "//" comments.
 #include <DocumentIndex/SealExtractor.h>
 
 #include <charconv>
@@ -202,8 +202,20 @@ namespace Sherlock::DocumentIndex
         }
     }
 
+    SealMatcher::SealMatcher(const SealGrammar& grammar) : imageTag_(grammar.ImageTag)
+    {
+        std::string alternation;
+        for (const auto& tag : grammar.Tags)
+        {
+            if (!alternation.empty()) alternation += '|';
+            alternation += tag;
+        }
+        tags_ = std::regex(R"(\[()" + alternation + R"()\])");
+    }
+
     Foundation::Expected<std::vector<SealRow>> ExtractSeals(const std::filesystem::path& file,
-                                                             std::string_view             repoRelativePath)
+                                                             std::string_view             repoRelativePath,
+                                                             const SealMatcher&           matcher)
     {
         std::ifstream stream(file, std::ios::binary);
         if (!stream)
@@ -211,12 +223,13 @@ namespace Sherlock::DocumentIndex
             return Fail(DiagnosticCode::Io, Severity::NotVerified, "ExtractSeals", file.string(),
                         "the file cannot be opened", "check it exists and is readable");
         }
-        return ExtractSeals(stream, repoRelativePath, file.string());
+        return ExtractSeals(stream, repoRelativePath, file.string(), matcher);
     }
 
     Foundation::Expected<std::vector<SealRow>> ExtractSeals(std::istream&     stream,
                                                             std::string_view repoRelativePath,
-                                                            std::string_view diagnosticSubject)
+                                                            std::string_view diagnosticSubject,
+                                                            const SealMatcher& matcher)
     {
         auto content = ReadWhole(stream, "ExtractSeals", diagnosticSubject);
         if (!content)
@@ -225,16 +238,13 @@ namespace Sherlock::DocumentIndex
         }
         const auto lines = SplitLines(*content);
 
-        // lint_seals.py's own TAG additionally recognises INF/DEMO/ASSUMPTION (and refuses
-        // RE/DOC/WEB as unknown-tag -- those are never seals, so this pattern never matches them).
-        static const std::regex tagPattern(R"(\[(BIN|KIT|OBS|API|INF|DEMO|ASSUMPTION)\])");
         static const std::regex cacheAddress(R"(0x(1[89a-f][0-9a-f]{7}|2[0-9a-f]{8})\b)");
 
         std::vector<SealRow> seals;
         for (const auto& block : SplitBlocks(lines))
         {
             std::vector<TagMatch> tags;
-            for (auto it = std::sregex_iterator(block.Text.begin(), block.Text.end(), tagPattern);
+            for (auto it = std::sregex_iterator(block.Text.begin(), block.Text.end(), matcher.Tags());
                  it != std::sregex_iterator(); ++it)
             {
                 tags.push_back({static_cast<std::size_t>(it->position(0)), static_cast<std::size_t>(it->length(0)),
@@ -247,7 +257,7 @@ namespace Sherlock::DocumentIndex
 
                 std::optional<std::string> image;
                 auto                        afterImage = afterTag;
-                if (tag.Tag == "BIN")
+                if (!matcher.ImageTag().empty() && tag.Tag == matcher.ImageTag())
                 {
                     if (const auto found = TryImage(block.Text, afterTag))
                     {

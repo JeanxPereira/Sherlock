@@ -2,6 +2,7 @@
 // SplitDocument: one file -> its DocSection rows, laudo or concept page (derived).
 #pragma once
 
+#include <DocumentIndex/Corpus.h>
 #include <Foundation/Diagnostic.h>
 
 #include <cstddef>
@@ -27,16 +28,17 @@ namespace Sherlock::DocumentIndex
     // copied through unchanged into Text and the FTS5 trigram index (DocumentIndexGates.cpp
     // locks the round trip).
 
-    // docs/re/<slug>.md: one DocSection per heading, spanning to the line before the next heading
-    // whose Level is <= its own (decision 2 of the phase-2 plan) -- a deeper, unnumbered heading
-    // stays inside its enclosing section's Text AND is independently addressable by its own title.
-    // A file with NO heading at all returns an empty (successful) vector, still counted as read
-    // for Coverage though it contributes zero Sections (DocumentIndexGates.cpp locks this shape).
-    // docs/concepts/<addr>.md (path contains "docs/concepts/"): exactly one DocSection for the
-    // whole file, Number null, Title = the front matter's title, spanning line 1 through EOF.
+    // Kind Evidence: one DocSection per heading, spanning to the line before the next heading
+    // whose Level is <= its own -- a deeper, unnumbered heading stays inside its enclosing
+    // section's Text AND is independently addressable by its own title. A file with NO heading at
+    // all returns an empty (successful) vector, still counted as read for Coverage.
+    // Kind Concept: exactly one DocSection for the whole file, Number null, Title = the front
+    // matter's title, spanning line 1 through EOF. The kind is the collection's, never the path's.
     Foundation::Expected<std::vector<DocSection>> SplitDocument(const std::filesystem::path& file,
-                                                                std::string_view              repoRelativePath);
+                                                                std::string_view              repoRelativePath,
+                                                                CollectionKind                kind);
     Foundation::Expected<std::vector<DocSection>> SplitDocument(std::istream&     stream,
                                                                 std::string_view repoRelativePath,
-                                                                std::string_view diagnosticSubject);
+                                                                std::string_view diagnosticSubject,
+                                                                CollectionKind   kind);
 }

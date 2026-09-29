@@ -6,6 +6,7 @@
 #include <Store/Database.h>
 #include <Store/Schema.h>
 
+#include "CorpusFixture.h"
 #include "SherlockHarness.h"
 
 #include <chrono>
@@ -299,7 +300,7 @@ namespace
         }
         const auto documentsPath = root / "Documents.db";
 
-        const auto first = DocumentIndex::BuildDocuments(root, documentsPath);
+        const auto first = DocumentIndex::BuildDocuments(FixtureCorpus(root), documentsPath);
         Expect(first.has_value(), "the first build succeeds and produces a good store");
         if (!first)
         {
@@ -318,7 +319,7 @@ namespace
             stream << "not a directory";
         }
 
-        const auto second = DocumentIndex::BuildDocuments(root, documentsPath);
+        const auto second = DocumentIndex::BuildDocuments(FixtureCorpus(root), documentsPath);
         Expect(!second.has_value(),
                "a build that cannot even walk docs/re fails -- a sanity check on this gate's own setup");
 

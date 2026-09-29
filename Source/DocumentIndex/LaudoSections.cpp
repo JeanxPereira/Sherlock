@@ -56,7 +56,8 @@ namespace Sherlock::DocumentIndex
     }
 
     Foundation::Expected<std::vector<DocSection>> SplitDocument(const std::filesystem::path& file,
-                                                                std::string_view              repoRelativePath)
+                                                                std::string_view              repoRelativePath,
+                                                                CollectionKind                kind)
     {
         std::ifstream stream(file, std::ios::binary);
         if (!stream)
@@ -64,12 +65,13 @@ namespace Sherlock::DocumentIndex
             return Fail(DiagnosticCode::Io, Severity::NotVerified, "SplitDocument", file.string(),
                         "the file cannot be opened", "check it exists and is readable");
         }
-        return SplitDocument(stream, repoRelativePath, file.string());
+        return SplitDocument(stream, repoRelativePath, file.string(), kind);
     }
 
     Foundation::Expected<std::vector<DocSection>> SplitDocument(std::istream&     stream,
                                                                 std::string_view repoRelativePath,
-                                                                std::string_view diagnosticSubject)
+                                                                std::string_view diagnosticSubject,
+                                                                CollectionKind   kind)
     {
         auto content = ReadWhole(stream, "SplitDocument", diagnosticSubject);
         if (!content)
@@ -79,7 +81,7 @@ namespace Sherlock::DocumentIndex
         const std::string_view text = *content;
         const auto lineOffsets = LineOffsets(text);
 
-        if (repoRelativePath.find("docs/concepts/") != std::string_view::npos)
+        if (kind == CollectionKind::Concept)
         {
             auto frontMatter = ParseFrontMatter(text);
             if (!frontMatter)

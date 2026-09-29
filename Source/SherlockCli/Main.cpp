@@ -7,6 +7,7 @@
 #include <SherlockCli/Demangler.h>
 #include <SherlockCli/Documents.h>
 #include <SherlockCli/HexRays.h>
+#include <SherlockCli/LegacyCorpus.h>
 #include <SherlockCli/Queries.h>
 #include <SherlockCli/Towers.h>
 
@@ -181,7 +182,7 @@ namespace
                          invocation.Json);
             return 2;
         }
-        auto report = DocumentIndex::BuildDocuments(invocation.Repo, invocation.Documents);
+        auto report = DocumentIndex::BuildDocuments(Cli::LegacyCorpus(invocation.Repo), invocation.Documents);
         if (!report)
         {
             PrintVerdict({Cli::VerdictKind::NotVerified, 0, report.error().Format(), 0, 0}, invocation.Json);

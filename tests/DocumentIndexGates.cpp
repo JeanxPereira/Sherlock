@@ -1,10 +1,12 @@
 // Sherlock — tests/DocumentIndexGates.cpp
 // Unit gates for DocumentIndex's pure parsers, over the fixtures in tests/fixtures/.
+#include "CorpusFixture.h"
 #include "SherlockHarness.h"
 
 #include <DocumentIndex/CitationExtractor.h>
 #include <DocumentIndex/Builder.h>
 #include <DocumentIndex/ConceptFrontMatter.h>
+#include <DocumentIndex/Corpus.h>
 #include <DocumentIndex/FileStamp.h>
 #include <DocumentIndex/GitHead.h>
 #include <DocumentIndex/Heading.h>
@@ -99,7 +101,7 @@ namespace
 
     void TestSplitDocumentLaudo()
     {
-        auto sections = DocumentIndex::SplitDocument(FixturePath("heading-sample.md"), "docs/re/heading-sample.md");
+        auto sections = DocumentIndex::SplitDocument(FixturePath("heading-sample.md"), "docs/re/heading-sample.md", DocumentIndex::CollectionKind::Evidence);
         Expect(sections.has_value(), "SplitDocument parses the heading fixture");
         const auto& list = *sections;
         const auto  types =
@@ -129,7 +131,7 @@ namespace
             std::ofstream stream(file, std::ios::binary);
             stream << "# 1 First\r\nbody\r\n# 2 Second\r\nend\r\n";
         }
-        const auto sections = DocumentIndex::SplitDocument(file, "docs/re/sample.md");
+        const auto sections = DocumentIndex::SplitDocument(file, "docs/re/sample.md", DocumentIndex::CollectionKind::Evidence);
         Expect(sections.has_value() && sections->size() == 2, "SplitDocument reads two CRLF sections");
         if (sections && sections->size() == 2)
         {
@@ -143,7 +145,7 @@ namespace
     {
         FailingReadBuffer buffer("# 1 Incomplete\\n");
         std::istream      stream(&buffer);
-        const auto sections = DocumentIndex::SplitDocument(stream, "docs/re/incomplete.md", "injected stream");
+        const auto sections = DocumentIndex::SplitDocument(stream, "docs/re/incomplete.md", "injected stream", DocumentIndex::CollectionKind::Evidence);
         Expect(!sections, "SplitDocument rejects an injected stream read failure");
     }
 
@@ -162,7 +164,7 @@ namespace
         std::filesystem::remove_all(root, cleanupError);
         std::filesystem::create_directories(root);
         std::ofstream(root / "Seal.h") << "// [BIN] DesignLibrary 0x27c198c20\\n";
-        const auto walked = DocumentIndex::WalkSourceForTesting(root, [] {
+        const auto walked = DocumentIndex::WalkCode(root, {".h"}, [] {
             return Foundation::Fail(Foundation::DiagnosticCode::Io, Foundation::Severity::NotVerified,
                                     "SourceWalkerGate", "increment", "injected increment failure", "retry the walk");
         });
@@ -252,13 +254,13 @@ namespace
             std::ofstream source(root / "Source" / "Seal.h", std::ios::binary);
             source << "// [BIN] DesignLibrary 0x27c198c20\n";
         }
-        const auto report = DocumentIndex::BuildDocuments(root, documents);
+        const auto report = DocumentIndex::BuildDocuments(FixtureCorpus(root), documents);
         Expect(report.has_value(), "BuildDocuments indexes a minimal repository");
         if (report)
         {
-            ExpectEq(report->LaudoFilesRead, std::uint64_t{1}, "the laudo coverage read count");
-            ExpectEq(report->ConceptFilesRead, std::uint64_t{1}, "the concept coverage read count");
-            ExpectEq(report->SourceFilesRead, std::uint64_t{1}, "the source coverage read count");
+            ExpectEq(report->Collections.at(0).Read, std::uint64_t{1}, "the laudo coverage read count");
+            ExpectEq(report->Collections.at(1).Read, std::uint64_t{1}, "the concept coverage read count");
+            ExpectEq(report->Collections.at(2).Read, std::uint64_t{1}, "the source coverage read count");
         }
         auto db = Store::Database::Open(documents, Store::Database::Mode::ReadOnly);
         Expect(db.has_value(), "the built documents store can be opened");
@@ -282,7 +284,7 @@ namespace
         std::error_code cleanupError;
         std::filesystem::remove_all(root, cleanupError);
         std::filesystem::create_directories(documents);
-        const auto report = DocumentIndex::BuildDocuments(root, documents);
+        const auto report = DocumentIndex::BuildDocuments(FixtureCorpus(root), documents);
         Expect(!report.has_value(), "BuildDocuments refuses a directory passed as --documents");
         Expect(std::filesystem::is_directory(documents), "BuildDocuments leaves a --documents directory intact");
         std::filesystem::remove_all(root, cleanupError);
@@ -299,7 +301,7 @@ namespace
             std::ofstream invalid(root / "docs" / "concepts" / "invalid.md", std::ios::binary);
             invalid << "---\ntitle: missing closing front matter\n";
         }
-        const auto report = DocumentIndex::BuildDocuments(root, documents);
+        const auto report = DocumentIndex::BuildDocuments(FixtureCorpus(root), documents);
         Expect(!report.has_value(), "a malformed indexed document fails the build");
         auto db = Store::Database::Open(documents, Store::Database::Mode::ReadOnly);
         if (db)
@@ -317,7 +319,7 @@ namespace
     void TestSplitDocumentConcept()
     {
         auto sections =
-            DocumentIndex::SplitDocument(FixturePath("concept-sample.md"), "docs/concepts/concept-sample.md");
+            DocumentIndex::SplitDocument(FixturePath("concept-sample.md"), "docs/concepts/concept-sample.md", DocumentIndex::CollectionKind::Concept);
         Expect(sections.has_value(), "SplitDocument parses the concept fixture");
         ExpectEq(sections->size(), std::size_t(1), "a concept page is exactly one Section");
         ExpectEq((*sections)[0].Title, "The colour-matrix product", "Title comes from the front matter");
@@ -357,7 +359,7 @@ namespace
             std::ofstream stream(file, std::ios::binary);
             stream << "# 1 Heading\nbody " << cp1252MiddleDot << " tail\n";
         }
-        const auto sections = DocumentIndex::SplitDocument(file, "docs/re/sample.md");
+        const auto sections = DocumentIndex::SplitDocument(file, "docs/re/sample.md", DocumentIndex::CollectionKind::Evidence);
         Expect(sections.has_value() && sections->size() == 1, "SplitDocument reads the byte as-is");
         if (sections && sections->size() == 1)
         {
@@ -383,11 +385,11 @@ namespace
             std::ofstream re(root / "docs" / "re" / "no-heading.md", std::ios::binary);
             re << "Prose with no heading at all -- nothing to split on.\n";
         }
-        const auto report = DocumentIndex::BuildDocuments(root, documents);
+        const auto report = DocumentIndex::BuildDocuments(FixtureCorpus(root), documents);
         Expect(report.has_value(), "BuildDocuments indexes a heading-less laudo without failing");
         if (report)
         {
-            ExpectEq(report->LaudoFilesRead, std::uint64_t{1},
+            ExpectEq(report->Collections.at(0).Read, std::uint64_t{1},
                     "the heading-less file counts as read for Coverage");
             ExpectEq(report->SectionsWritten, std::uint64_t{0},
                     "it contributes zero Sections -- unreachable by find/laudo despite counting as read");
@@ -463,7 +465,7 @@ namespace
     void TestSealExtraction()
     {
         auto seals = DocumentIndex::ExtractSeals(FixturePath("seal-sample.txt"),
-                                                 "tests/fixtures/seal-sample.txt");
+                                                 "tests/fixtures/seal-sample.txt", FixtureSeals());
         Expect(seals.has_value(), "ExtractSeals reads the fixture");
         const auto& rows = *seals;
         ExpectEq(rows.size(), std::size_t(9),
@@ -531,10 +533,104 @@ namespace
     {
         FailingReadBuffer buffer("// [BIN] DesignLibrary 0x27c198c20\\n");
         std::istream      stream(&buffer);
-        const auto seals = DocumentIndex::ExtractSeals(stream, "Source/Incomplete.h", "injected stream");
+        const auto seals = DocumentIndex::ExtractSeals(stream, "Source/Incomplete.h", "injected stream", FixtureSeals());
         Expect(!seals, "ExtractSeals rejects an injected stream read failure");
     }
 }
+
+    // Kind decides how a file splits, never its path: a concept collection under any directory
+    // reads one page as one section, and an evidence collection splits by heading whatever its path.
+    void TestKindNotPathDecidesSplitting()
+    {
+        const auto root = std::filesystem::temp_directory_path() / "SherlockKindGate";
+        std::error_code cleanupError;
+        std::filesystem::remove_all(root, cleanupError);
+        std::filesystem::create_directories(root);
+        const auto page = root / "page.md";
+        {
+            std::ofstream stream(page, std::ios::binary);
+            stream << "---\ntitle: A page\naliases: [0x27c198c20]\n---\n# 1 First\ntext\n# 2 Second\ntext\n";
+        }
+        const auto asConcept =
+            DocumentIndex::SplitDocument(page, "handbook/page.md", DocumentIndex::CollectionKind::Concept);
+        Expect(asConcept.has_value() && asConcept->size() == 1 && (*asConcept)[0].Title == "A page",
+               "a concept collection outside docs/concepts reads its page as one section titled by the front matter");
+        const auto asEvidence =
+            DocumentIndex::SplitDocument(page, "docs/concepts/page.md", DocumentIndex::CollectionKind::Evidence);
+        Expect(asEvidence.has_value() && asEvidence->size() == 2,
+               "an evidence collection splits by heading even when its path says docs/concepts");
+        std::filesystem::remove_all(root, cleanupError);
+    }
+
+    // The tags are the consumer's: a bracketed word outside the grammar is text, and only the
+    // declared image tag carries an image.
+    void TestSealTagsComeFromGrammar()
+    {
+        const DocumentIndex::SealMatcher matcher(DocumentIndex::SealGrammar{{"SEAL", "NOTE"}, "SEAL"});
+        std::istringstream stream("// [SEAL] Sample 0x240622d98\n\n// [NOTE] Sample 0x240622d98\n\n"
+                                  "// [BIN] Sample 0x240622d98\n");
+        const auto rows = DocumentIndex::ExtractSeals(stream, "Source/Grammar.h", "grammar stream", matcher);
+        Expect(rows.has_value() && rows->size() == 2, "only the two declared tags produce rows; [BIN] is not declared");
+        if (rows && rows->size() == 2)
+        {
+            ExpectEq((*rows)[0].Tag, std::string("SEAL"), "the first row is the image tag");
+            Expect((*rows)[0].Image == std::optional<std::string>("Sample"), "the declared image tag carries its image");
+            Expect(!(*rows)[1].Image.has_value(), "a tag that is not the image tag carries no image");
+            Expect((*rows)[1].Address == std::optional<std::uint64_t>(0x240622d98),
+                   "every declared tag still carries its address");
+        }
+    }
+
+    // A consumer names its own collections: coverage is written under the declared path, a code
+    // collection without a seal grammar records its files and no seal, and the store carries the
+    // configuration's hash.
+    void TestBuildDocumentsFollowsTheCorpus()
+    {
+        const auto root = std::filesystem::temp_directory_path() / "SherlockCorpusGate";
+        const auto documents = root / "out" / "Documents.db";
+        std::error_code cleanupError;
+        std::filesystem::remove_all(root, cleanupError);
+        std::filesystem::create_directories(root / ".git");
+        std::filesystem::create_directories(root / "handbook");
+        std::filesystem::create_directories(root / "src" / "deep");
+        {
+            std::ofstream head(root / ".git" / "HEAD");
+            head << std::string(40, 'd') << "\n";
+            std::ofstream page(root / "handbook" / "page.md", std::ios::binary);
+            page << "# 1 One\ntext\n";
+            std::ofstream code(root / "src" / "deep" / "a.cc", std::ios::binary);
+            code << "// [BIN] Sample 0x240622d98\n";
+            std::ofstream skipped(root / "src" / "b.h", std::ios::binary);
+            skipped << "// [BIN] Sample 0x240622d98\n";
+        }
+        DocumentIndex::Corpus corpus;
+        corpus.Root        = root;
+        corpus.Collections = {{"handbook", DocumentIndex::CollectionKind::Evidence, {}},
+                              {"src", DocumentIndex::CollectionKind::Code, {".cc"}}};
+        corpus.ConfigSha256 = std::string(64, 'e');
+        const auto report = DocumentIndex::BuildDocuments(corpus, documents);
+        Expect(report.has_value(), "BuildDocuments indexes a corpus with no AquaKit-shaped directory");
+        if (report)
+        {
+            Expect(report->Collections.size() == 2 && report->Collections[0].Path == "handbook" &&
+                       report->Collections[1].Path == "src" && report->Collections[1].Read == 1 &&
+                       report->Collections[1].Total == 1,
+                   "the report names each declared collection in order, and the code walk matched .cc only");
+            ExpectEq(report->SealsWritten, std::uint64_t{0}, "a code collection without a seal grammar writes no seal");
+        }
+        auto db = Store::Database::Open(documents, Store::Database::Mode::ReadOnly);
+        Expect(db.has_value(), "the corpus store opens");
+        if (db)
+        {
+            const auto handbook = db->ScalarInt("SELECT Read FROM Coverage WHERE Root = 'handbook'");
+            const auto src      = db->ScalarInt("SELECT Total FROM Coverage WHERE Root = 'src'");
+            const auto files    = db->ScalarInt("SELECT COUNT(*) FROM File WHERE Path = 'src/deep/a.cc'");
+            Expect(handbook && *handbook == 1 && src && *src == 1, "Coverage rows carry the declared collection paths");
+            Expect(files && *files == 1, "the code file is recorded for staleness even without seals");
+            ExpectEq(DocumentIndex::BuiltConfigSha256(*db), std::string(64, 'e'), "Meta records the configuration's hash");
+        }
+        std::filesystem::remove_all(root, cleanupError);
+    }
 
 int main()
 {
@@ -555,5 +651,8 @@ int main()
     TestCitationExtraction();
     TestSealExtraction();
     TestExtractSealsRejectsReadFailure();
+    TestKindNotPathDecidesSplitting();
+    TestSealTagsComeFromGrammar();
+    TestBuildDocumentsFollowsTheCorpus();
     return Finish();
 }

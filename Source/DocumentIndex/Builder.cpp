@@ -11,8 +11,10 @@
 #include <Store/Database.h>
 #include <Store/Schema.h>
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <optional>
 #include <system_error>
 #include <vector>
 
@@ -59,64 +61,6 @@ namespace Sherlock::DocumentIndex
                 {
                     return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
                                 "the directory cannot be walked", "check the repository layout");
-                }
-            }
-            return files;
-        }
-
-        Foundation::Expected<std::vector<std::filesystem::path>> WalkSource(
-            const std::filesystem::path& dir, const std::function<Foundation::Expected<void>()>& afterIncrement = {})
-        {
-            std::error_code error;
-            if (!std::filesystem::exists(dir, error))
-            {
-                if (error)
-                {
-                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
-                                "the Source directory cannot be inspected", "check the repository layout");
-                }
-                return std::vector<std::filesystem::path>{};
-            }
-            std::vector<std::filesystem::path> files;
-            std::filesystem::recursive_directory_iterator iterator(dir, error), end;
-            if (error)
-            {
-                return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
-                            "the Source directory cannot be read", "check the repository layout");
-            }
-            while (iterator != end)
-            {
-                const auto name = iterator->path().filename().string();
-                bool skip = false;
-                if (iterator->is_directory(error) && !error && (name == "build" || name == "lab" || name == ".git"))
-                {
-                    iterator.disable_recursion_pending();
-                    skip = true;
-                }
-                if (error)
-                {
-                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", iterator->path().string(),
-                                "a Source entry cannot be inspected", "check the repository layout");
-                }
-                if (!skip && iterator->is_regular_file(error) && !error && HasSealExtension(iterator->path()))
-                {
-                    files.push_back(iterator->path());
-                }
-                if (error)
-                {
-                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", iterator->path().string(),
-                                "a Source entry cannot be inspected", "check the repository layout");
-                }
-                iterator.increment(error);
-                if (error)
-                {
-                    return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
-                                "the Source directory cannot be walked", "check the repository layout");
-                }
-                if (afterIncrement)
-                {
-                    auto injected = afterIncrement();
-                    if (!injected) return std::unexpected(injected.error());
                 }
             }
             return files;
@@ -282,17 +226,80 @@ namespace Sherlock::DocumentIndex
         }
     }
 
-    Foundation::Expected<std::vector<std::filesystem::path>> WalkSourceForTesting(
-        const std::filesystem::path& root, std::function<Foundation::Expected<void>()> afterIncrement)
+    Foundation::Expected<std::vector<std::filesystem::path>> WalkCode(
+        const std::filesystem::path& dir, const std::vector<std::string>& extensions,
+        std::function<Foundation::Expected<void>()> afterIncrement)
     {
-        return WalkSource(root, afterIncrement);
+        std::error_code error;
+        if (!std::filesystem::exists(dir, error))
+        {
+            if (error)
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
+                            "the code collection cannot be inspected", "check the collection's path");
+            }
+            return std::vector<std::filesystem::path>{};
+        }
+        std::vector<std::filesystem::path> files;
+        std::filesystem::recursive_directory_iterator iterator(dir, error), end;
+        if (error)
+        {
+            return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
+                        "the code collection cannot be read", "check the collection's path");
+        }
+        while (iterator != end)
+        {
+            const auto name = iterator->path().filename().string();
+            bool skip = false;
+            if (iterator->is_directory(error) && !error && (name == "build" || name == "lab" || name == ".git"))
+            {
+                iterator.disable_recursion_pending();
+                skip = true;
+            }
+            if (error)
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", iterator->path().string(),
+                            "a code collection entry cannot be inspected", "check the collection's path");
+            }
+            const auto extension = iterator->path().extension().string();
+            if (!skip && iterator->is_regular_file(error) && !error &&
+                std::find(extensions.begin(), extensions.end(), extension) != extensions.end())
+            {
+                files.push_back(iterator->path());
+            }
+            if (error)
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", iterator->path().string(),
+                            "a code collection entry cannot be inspected", "check the collection's path");
+            }
+            iterator.increment(error);
+            if (error)
+            {
+                return Fail(DiagnosticCode::Io, Severity::NotVerified, "BuildDocuments", dir.string(),
+                            "the code collection cannot be walked", "check the collection's path");
+            }
+            if (afterIncrement)
+            {
+                auto injected = afterIncrement();
+                if (!injected) return std::unexpected(injected.error());
+            }
+        }
+        return files;
     }
 
-    bool HasSealExtension(const std::filesystem::path& path)
+    Foundation::Expected<std::vector<std::filesystem::path>> WalkCollection(const std::filesystem::path& root,
+                                                                            const Collection&            collection)
     {
-        const auto extension = path.extension();
-        return extension == ".h" || extension == ".hpp" || extension == ".cpp" || extension == ".frag" ||
-               extension == ".vert" || extension == ".glsl";
+        auto relative = std::filesystem::path(collection.Path);
+        const auto dir = root / relative.make_preferred();
+        if (collection.Kind == CollectionKind::Code) return WalkCode(dir, collection.Extensions);
+        return WalkMarkdown(dir);
+    }
+
+    std::string BuiltConfigSha256(Store::Database& documents)
+    {
+        auto value = Store::ReadMeta(documents, "ConfigSha256");
+        return value ? *value : std::string();
     }
 
     bool IsIndexedMarkdown(const std::filesystem::path& path)
@@ -310,7 +317,7 @@ namespace Sherlock::DocumentIndex
         return WalkMarkdown(dir);
     }
 
-    Foundation::Expected<DocumentsBuildReport> BuildDocuments(const std::filesystem::path& repoRoot,
+    Foundation::Expected<DocumentsBuildReport> BuildDocuments(const Corpus&                corpus,
                                                               const std::filesystem::path& documentsPath)
     {
         const auto start = std::chrono::steady_clock::now();
@@ -330,6 +337,8 @@ namespace Sherlock::DocumentIndex
         }
 
         DocumentsBuildReport report;
+        std::optional<SealMatcher> seals;
+        if (corpus.Seals) seals.emplace(*corpus.Seals);
         // Everything that touches tempPath's connection lives in this block, so the connection
         // (and any WAL/SHM it opened) closes before PublishDocuments renames the file underneath
         // it -- Windows refuses to rename a file a live handle still holds open (finding 7).
@@ -349,17 +358,15 @@ namespace Sherlock::DocumentIndex
         if (!insertSeal) return std::unexpected(insertSeal.error());
         if (!insertFile) return std::unexpected(insertFile.error());
 
-        const auto indexMarkdown = [&](const std::filesystem::path& root, bool isConcept)
-            -> Foundation::Expected<std::pair<std::uint64_t, std::uint64_t>> {
-            auto files = WalkMarkdown(root);
-            if (!files) return std::unexpected(files.error());
+        const auto indexMarkdown = [&](const std::vector<std::filesystem::path>& files, CollectionKind kind)
+            -> Foundation::Expected<std::uint64_t> {
             std::uint64_t read = 0;
-            for (const auto& file : *files)
+            for (const auto& file : files)
             {
-                const auto relative = RepoRelative(repoRoot, file);
+                const auto relative = RepoRelative(corpus.Root, file);
                 auto stamp = StatInput(file);
                 if (!stamp) return std::unexpected(stamp.error());
-                auto sections = SplitDocument(file, relative);
+                auto sections = SplitDocument(file, relative, kind);
                 if (!sections) return std::unexpected(sections.error());
                 if (auto ok = WriteFile(*insertFile, relative, *stamp); !ok) return std::unexpected(ok.error());
                 ++read;
@@ -377,7 +384,7 @@ namespace Sherlock::DocumentIndex
                     ++report.SectionsWritten;
                     const auto sectionId = database->LastInsertId();
                     std::vector<Citation> citations;
-                    if (isConcept) AppendConceptCitations(citations, section.Text); else citations = ExtractCitations(section.Text);
+                    if (kind == CollectionKind::Concept) AppendConceptCitations(citations, section.Text); else citations = ExtractCitations(section.Text);
                     for (const auto& citation : citations)
                     {
                         if (auto ok = insertCitation->Reset(); !ok) return std::unexpected(ok.error());
@@ -391,52 +398,63 @@ namespace Sherlock::DocumentIndex
                     }
                 }
             }
-            return std::pair{read, static_cast<std::uint64_t>(files->size())};
+            return read;
         };
 
-        auto laudos = indexMarkdown(repoRoot / "docs" / "re", false);
-        if (!laudos) return std::unexpected(laudos.error());
-        report.LaudoFilesRead = laudos->first; report.LaudoFilesTotal = laudos->second;
-        auto concepts = indexMarkdown(repoRoot / "docs" / "concepts", true);
-        if (!concepts) return std::unexpected(concepts.error());
-        report.ConceptFilesRead = concepts->first; report.ConceptFilesTotal = concepts->second;
-        auto sourceFiles = WalkSource(repoRoot / "Source");
-        if (!sourceFiles) return std::unexpected(sourceFiles.error());
-        report.SourceFilesTotal = sourceFiles->size();
-        for (const auto& file : *sourceFiles)
-        {
-            const auto relative = RepoRelative(repoRoot, file);
-            auto stamp = StatInput(file);
-            if (!stamp) return std::unexpected(stamp.error());
-            auto seals = ExtractSeals(file, relative);
-            if (!seals) return std::unexpected(seals.error());
-            if (auto ok = WriteFile(*insertFile, relative, *stamp); !ok) return std::unexpected(ok.error());
-            ++report.SourceFilesRead;
-            for (const auto& seal : *seals)
+        const auto indexCode = [&](const std::vector<std::filesystem::path>& files) -> Foundation::Expected<std::uint64_t> {
+            std::uint64_t read = 0;
+            for (const auto& file : files)
             {
-                if (auto ok = insertSeal->Reset(); !ok) return std::unexpected(ok.error());
-                if (auto ok = insertSeal->Bind(1, seal.File); !ok) return std::unexpected(ok.error());
-                if (auto ok = insertSeal->Bind(2, static_cast<std::int64_t>(seal.Line)); !ok) return std::unexpected(ok.error());
-                if (auto ok = insertSeal->Bind(3, seal.Tag); !ok) return std::unexpected(ok.error());
-                if (seal.Image) { if (auto ok = insertSeal->Bind(4, *seal.Image); !ok) return std::unexpected(ok.error()); }
-                else { if (auto ok = insertSeal->BindNull(4); !ok) return std::unexpected(ok.error()); }
-                if (auto ok = insertSeal->BindNull(5); !ok) return std::unexpected(ok.error());
-                if (seal.Address) { if (auto ok = insertSeal->Bind(6, static_cast<std::int64_t>(*seal.Address)); !ok) return std::unexpected(ok.error()); }
-                else { if (auto ok = insertSeal->BindNull(6); !ok) return std::unexpected(ok.error()); }
-                if (auto ok = insertSeal->Step(); !ok) return std::unexpected(ok.error());
-                ++report.SealsWritten;
+                const auto relative = RepoRelative(corpus.Root, file);
+                auto stamp = StatInput(file);
+                if (!stamp) return std::unexpected(stamp.error());
+                std::vector<SealRow> rows;
+                if (seals)
+                {
+                    auto extracted = ExtractSeals(file, relative, *seals);
+                    if (!extracted) return std::unexpected(extracted.error());
+                    rows = std::move(*extracted);
+                }
+                if (auto ok = WriteFile(*insertFile, relative, *stamp); !ok) return std::unexpected(ok.error());
+                ++read;
+                for (const auto& seal : rows)
+                {
+                    if (auto ok = insertSeal->Reset(); !ok) return std::unexpected(ok.error());
+                    if (auto ok = insertSeal->Bind(1, seal.File); !ok) return std::unexpected(ok.error());
+                    if (auto ok = insertSeal->Bind(2, static_cast<std::int64_t>(seal.Line)); !ok) return std::unexpected(ok.error());
+                    if (auto ok = insertSeal->Bind(3, seal.Tag); !ok) return std::unexpected(ok.error());
+                    if (seal.Image) { if (auto ok = insertSeal->Bind(4, *seal.Image); !ok) return std::unexpected(ok.error()); }
+                    else { if (auto ok = insertSeal->BindNull(4); !ok) return std::unexpected(ok.error()); }
+                    if (auto ok = insertSeal->BindNull(5); !ok) return std::unexpected(ok.error());
+                    if (seal.Address) { if (auto ok = insertSeal->Bind(6, static_cast<std::int64_t>(*seal.Address)); !ok) return std::unexpected(ok.error()); }
+                    else { if (auto ok = insertSeal->BindNull(6); !ok) return std::unexpected(ok.error()); }
+                    if (auto ok = insertSeal->Step(); !ok) return std::unexpected(ok.error());
+                    ++report.SealsWritten;
+                }
             }
+            return read;
+        };
+
+        for (const auto& collection : corpus.Collections)
+        {
+            auto files = WalkCollection(corpus.Root, collection);
+            if (!files) return std::unexpected(files.error());
+            auto read = collection.Kind == CollectionKind::Code ? indexCode(*files) : indexMarkdown(*files, collection.Kind);
+            if (!read) return std::unexpected(read.error());
+            report.Collections.push_back({collection.Path, *read, static_cast<std::uint64_t>(files->size())});
         }
         if (auto ok = Store::CreateDocumentIndexes(*database); !ok) return std::unexpected(ok.error());
         if (auto ok = database->Execute("INSERT INTO SectionFtsTitle(rowid, Title) SELECT Id, Title FROM Section"); !ok) return std::unexpected(ok.error());
         if (auto ok = database->Execute("INSERT INTO SectionFtsText(rowid, Text) SELECT Id, Text FROM Section"); !ok) return std::unexpected(ok.error());
-        auto head = ReadCurrentHead(repoRoot);
+        auto head = ReadCurrentHead(corpus.Root);
         if (!head) return std::unexpected(head.error());
         report.Head = *head;
         if (auto ok = WriteMeta(*database, "Head", report.Head); !ok) return std::unexpected(ok.error());
-        if (auto ok = WriteCoverage(*database, "docs/re", report.LaudoFilesRead, report.LaudoFilesTotal); !ok) return std::unexpected(ok.error());
-        if (auto ok = WriteCoverage(*database, "docs/concepts", report.ConceptFilesRead, report.ConceptFilesTotal); !ok) return std::unexpected(ok.error());
-        if (auto ok = WriteCoverage(*database, "Source", report.SourceFilesRead, report.SourceFilesTotal); !ok) return std::unexpected(ok.error());
+        if (auto ok = WriteMeta(*database, "ConfigSha256", corpus.ConfigSha256); !ok) return std::unexpected(ok.error());
+        for (const auto& entry : report.Collections)
+        {
+            if (auto ok = WriteCoverage(*database, entry.Path, entry.Read, entry.Total); !ok) return std::unexpected(ok.error());
+        }
         if (auto ok = transaction->Commit(); !ok) return std::unexpected(ok.error());
         } // database and transaction close here, before the temp file is published
 
