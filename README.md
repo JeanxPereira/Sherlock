@@ -22,6 +22,53 @@ ends in a **verdict line with its coverage**, so an empty answer always says how
 The first consumer is [AquaKit](https://github.com/JeanxPereira/AquaKit), which reaches it through
 a `sherlock.json` at its root.
 
+## How it works
+
+```mermaid
+flowchart LR
+    classDef input fill:#374151,stroke:#d1d5db,stroke-width:2px,color:#fff
+    classDef build fill:#1e40af,stroke:#bfdbfe,stroke-width:2px,color:#fff
+    classDef store fill:#7a1b33,stroke:#f4b6c6,stroke-width:2px,color:#fff
+    classDef query fill:#5b21b6,stroke:#ddd6fe,stroke-width:2px,color:#fff
+    classDef verdict fill:#047857,stroke:#a7f3d0,stroke-width:2px,color:#fff
+
+    subgraph In["Inputs"]
+        direction TB
+        Cache(["dyld shared cache"]):::input
+        Dylibs(["Extracted dylibs<br/>+ IDA"]):::input
+        Consumer(["Consumer<br/>sherlock.json · docs · Source"]):::input
+    end
+
+    subgraph Build["Build once"]
+        direction TB
+        BF(["build facts<br/>capstone"]):::build
+        BH(["build hexrays<br/>one worker per image"]):::build
+        BD(["build docs"]):::build
+    end
+
+    subgraph Stores["Stores"]
+        direction TB
+        L1[("Layer 1 · Facts<br/>Catalog.db · Images/*.db")]:::store
+        L2[("Layer 2 · Pseudocode<br/>Images/*.HexRays.db")]:::store
+        L3[("Layer 3 · Documents<br/>Documents.db")]:::store
+    end
+
+    Cache --> BF --> L1
+    Dylibs --> BH --> L2
+    Consumer --> BD --> L3
+
+    L1 & L2 & L3 --> Q(["q · callers · calls · refs · vcall<br/>fn · grep · find · laudo · status"]):::query
+    Q --> V(["verdict + coverage<br/>FOUND · EMPTY · PARTIAL · NOT VERIFIED"]):::verdict
+
+    style In fill:none,stroke:#9ca3af,stroke-width:2px,stroke-dasharray:5 5,color:#9ca3af
+    style Build fill:none,stroke:#3b82f6,stroke-width:2px,stroke-dasharray:5 5,color:#3b82f6
+    style Stores fill:none,stroke:#e0607e,stroke-width:2px,stroke-dasharray:5 5,color:#e0607e
+```
+
+Each layer is built once, from its own input. A query answers from the stores, opening the cache
+only to route an address to its image or to disassemble, and ends in a verdict that says how much
+it read.
+
 ## The three layers
 
 | Layer | Store | Holds | Built by |
